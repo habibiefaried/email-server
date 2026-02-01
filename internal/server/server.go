@@ -11,7 +11,7 @@ func RunSMTPServer(fqdn string, store storage.Storage) {
 	be := &Backend{Store: store}
 	s := smtp.NewServer(be)
 	s.Addr = ":25"
-	s.Domain = fqdn
+	// s.Domain = "" // Accept all domains
 	s.AllowInsecureAuth = true
 
 	log.Printf("Starting SMTP server on %s\n", s.Addr)

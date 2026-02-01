@@ -38,7 +38,7 @@ func (s *Session) Data(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("from: %s, saved in %s", s.From, filename)
+	log.Printf("from: %s, to: %s, saved in %s", s.From, s.To, filename)
 	return nil
 }
 
