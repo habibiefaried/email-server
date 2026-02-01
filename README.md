@@ -77,7 +77,8 @@ Below are real-world screenshots and explanations of the server in action:
 
 ### 2.2. Email Received and Saved
 
-![Email Saved to File](screenshots/2.3.png)
+![Email Saved to File](screenshots/2.1.png)
+![Email content](screenshots/2.3.png)
 
 - The server receives the email and saves it to a file in the `emails/` directory.
 - The filename is a timestamp in nanoseconds, ensuring uniqueness.
