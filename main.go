@@ -91,28 +91,13 @@ func printDNSRecords(fqdn, publicIP string) error {
 		return fmt.Errorf("invalid FQDN: %v", err)
 	}
 
-	// Extract domain from FQDN (e.g., test.mail.habibiefaried.com -> habibiefaried.com)
-	parts := strings.Split(fqdn, ".")
-	var domain string
-	if len(parts) >= 2 {
-		domain = strings.Join(parts[len(parts)-2:], ".")
-	} else {
-		domain = fqdn
-	}
-
-	// Generate PTR record (reverse IP)
-	ptrRecord, err := reversIP(publicIP)
-	if err != nil {
-		return fmt.Errorf("invalid PUBLIC_IP: %v", err)
-	}
-
 	// Check DNS records
 	aStatus := checkARecord(fqdn, publicIP)
-	mxStatus := checkMXRecord(domain, fqdn)
+	mxStatus := checkMXRecord(fqdn, fqdn)
 	ptrStatus := checkPTRRecord(publicIP, fqdn)
 
-	// If any check failed, return error
-	if aStatus != "✓ OK" || mxStatus != "✓ OK" || ptrStatus != "✓ OK" {
+	// If A or MX check failed, return error (PTR is optional)
+	if aStatus != "✓ OK" || mxStatus != "✓ OK" {
 		fmt.Println("\n" + strings.Repeat("=", 100))
 		fmt.Println("DNS RECORDS VERIFICATION FAILED")
 		fmt.Println(strings.Repeat("=", 100))
@@ -120,42 +105,49 @@ func printDNSRecords(fqdn, publicIP string) error {
 		fmt.Println("TYPE   | NAME                      | VALUE                                      | STATUS")
 		fmt.Println(strings.Repeat("-", 100))
 		fmt.Printf("A      | %-25s | %-40s | %s\n", fqdn, publicIP, aStatus)
-		fmt.Printf("MX     | %-25s | %-40s | %s\n", domain, fqdn+" (priority: 10)", mxStatus)
-		fmt.Printf("PTR    | %-25s | %-40s | %s\n", ptrRecord, fqdn, ptrStatus)
+		fmt.Printf("MX     | %-25s | %-40s | %s\n", fqdn, fqdn, mxStatus)
+		fmt.Printf("PTR    | %-25s | %-40s | %s (optional)\n", strings.TrimSuffix(reversIPValue(publicIP), ".in-addr.arpa")+".in-addr.arpa", fqdn, ptrStatus)
 		fmt.Println(strings.Repeat("=", 100))
 		return fmt.Errorf("DNS records not properly configured")
 	}
 
-	// All checks passed, print table with status
+	// A and MX passed, show all including PTR status
 	fmt.Println("\n" + strings.Repeat("=", 100))
-	fmt.Println("DNS RECORDS VERIFICATION PASSED")
+	fmt.Println("DNS RECORDS VERIFICATION")
 	fmt.Println(strings.Repeat("=", 100))
 	fmt.Println()
 	fmt.Println("TYPE   | NAME                      | VALUE                                      | STATUS")
 	fmt.Println(strings.Repeat("-", 100))
 	fmt.Printf("A      | %-25s | %-40s | %s\n", fqdn, publicIP, aStatus)
-	fmt.Printf("MX     | %-25s | %-40s | %s\n", domain, fqdn+" (priority: 10)", mxStatus)
-	fmt.Printf("PTR    | %-25s | %-40s | %s\n", ptrRecord, fqdn, ptrStatus)
+	fmt.Printf("MX     | %-25s | %-40s | %s\n", fqdn, fqdn, mxStatus)
+	if ptrStatus == "✓ OK" {
+		fmt.Printf("PTR    | %-25s | %-40s | %s\n", reversIPValue(publicIP), fqdn, ptrStatus)
+	} else {
+		fmt.Printf("PTR    | %-25s | %-40s | %s (warning: optional but recommended)\n", reversIPValue(publicIP), fqdn, ptrStatus)
+	}
 	fmt.Println(strings.Repeat("=", 100) + "\n")
 	return nil
 }
 
-func reversIP(ip string) (string, error) {
+func reversIPValue(ip string) string {
+	if err := isValidIP(ip); err != nil {
+		log.Fatalf("Invalid IP address: %v\n", err)
+	}
 	octets := strings.Split(ip, ".")
-	if len(octets) != 4 {
-		return "", fmt.Errorf("not a valid IPv4 address: %s", ip)
-	}
-	// Verify each octet is a valid number
-	for _, octet := range octets {
-		if octet == "" {
-			return "", fmt.Errorf("not a valid IPv4 address: %s", ip)
+	if len(octets) == 4 {
+		for i, j := 0, len(octets)-1; i < j; i, j = i+1, j-1 {
+			octets[i], octets[j] = octets[j], octets[i]
 		}
+		return strings.Join(octets, ".") + ".in-addr.arpa"
 	}
-	// Reverse the octets
-	for i, j := 0, len(octets)-1; i < j; i, j = i+1, j-1 {
-		octets[i], octets[j] = octets[j], octets[i]
+	return ip
+}
+
+func isValidIP(ip string) error {
+	if net.ParseIP(ip) == nil {
+		return fmt.Errorf("not a valid IPv4 or IPv6 address: %s", ip)
 	}
-	return strings.Join(octets, ".") + ".in-addr.arpa", nil
+	return nil
 }
 
 func isValidFQDN(fqdn string) error {
