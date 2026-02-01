@@ -1,31 +1,3 @@
-
-## Live Testing & Screenshots
-
-Below are real-world screenshots and explanations of the server in action:
-
-### 1. Setup & Receiving Email
-
-![Server Startup and DNS Verification](screenshots/1.png)
-
-- The server is started with the `MAIL_SERVERS` environment variable.
-- It prints a table for each FQDN and IP pair, showing the status of A, MX, and PTR records.
-- If any record is missing or incorrect, the server will not start and will print a clear error.
-
-### 2.1. Sending an Email from Gmail
-
-![Sending from Gmail](screenshots/2.2.png)
-
-- An email is sent from Gmail to the server's configured address.
-
-### 2.2. Email Received and Saved
-
-![Email Saved to File](screenshots/2.3.png)
-
-- The server receives the email and saves it to a file in the `emails/` directory.
-- The filename is a timestamp in nanoseconds, ensuring uniqueness.
-- The server logs a summary: `from: <sender>, saved in <filename>`
-- No email content is printed to the console for privacy and clarity.
-
 # Email Server
 
 A simple SMTP server in Go using the `go-smtp` library.
@@ -84,3 +56,30 @@ dig -x 1.2.3.4
 Should return: your FQDN (e.g., `mail1.example.com`)
 
 **Why it matters:** Many mail servers check PTR records to verify sender legitimacy. Without proper PTR records, your emails are more likely to be marked as spam.
+
+## Live Testing & Screenshots
+
+Below are real-world screenshots and explanations of the server in action:
+
+### 1. Setup & Receiving Email
+
+![Server Startup and DNS Verification](screenshots/1.png)
+
+- The server is started with the `MAIL_SERVERS` environment variable.
+- It prints a table for each FQDN and IP pair, showing the status of A, MX, and PTR records.
+- If any record is missing or incorrect, the server will not start and will print a clear error.
+
+### 2.1. Sending an Email from Gmail
+
+![Sending from Gmail](screenshots/2.2.png)
+
+- An email is sent from Gmail to the server's configured address.
+
+### 2.2. Email Received and Saved
+
+![Email Saved to File](screenshots/2.3.png)
+
+- The server receives the email and saves it to a file in the `emails/` directory.
+- The filename is a timestamp in nanoseconds, ensuring uniqueness.
+- The server logs a summary: `from: <sender>, saved in <filename>`
+- No email content is printed to the console for privacy and clarity.
