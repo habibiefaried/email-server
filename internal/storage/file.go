@@ -17,8 +17,13 @@ func NewFileStorage(dir string) *FileStorage {
 }
 
 func (fs *FileStorage) Save(email Email) (string, error) {
-	filename := fmt.Sprintf("%d.txt", time.Now().UnixNano())
-	path := filepath.Join(fs.Dir, filename)
+	now := time.Now()
+	filename := fmt.Sprintf("%s.%09d.txt", now.Format("2006-01-02-15-04-05"), now.Nanosecond())
+	dirPath := filepath.Join(fs.Dir, email.To, email.From)
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dirPath, filename)
 	f, err := os.Create(path)
 	if err != nil {
 		return "", err
