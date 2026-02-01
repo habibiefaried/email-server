@@ -10,7 +10,6 @@ type Email struct {
 
 // Storage is the interface for saving emails
 // Save should return the filename or an error
-//
 type Storage interface {
 	Save(email Email) (string, error)
 }
