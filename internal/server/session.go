@@ -5,17 +5,22 @@ import (
 	"log"
 
 	"github.com/emersion/go-smtp"
+	"github.com/habibiefaried/email-server/internal/storage"
 )
 
-type Session struct{}
+type Session struct {
+	From  string
+	To    string
+	Store storage.Storage
+}
 
 func (s *Session) Mail(from string, opts *smtp.MailOptions) error {
-	log.Printf("Mail from: %s\n", from)
+	s.From = from
 	return nil
 }
 
 func (s *Session) Rcpt(to string, opts *smtp.RcptOptions) error {
-	log.Printf("Rcpt to: %s\n", to)
+	s.To = to
 	return nil
 }
 
@@ -24,7 +29,16 @@ func (s *Session) Data(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Email body: %s\n", string(body))
+	email := storage.Email{
+		From:    s.From,
+		To:      s.To,
+		Content: string(body),
+	}
+	filename, err := s.Store.Save(email)
+	if err != nil {
+		return err
+	}
+	log.Printf("from: %s, saved in %s", s.From, filename)
 	return nil
 }
 

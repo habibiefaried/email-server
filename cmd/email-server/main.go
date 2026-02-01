@@ -6,6 +6,7 @@ import (
 
 	"github.com/habibiefaried/email-server/internal/dnsutil"
 	"github.com/habibiefaried/email-server/internal/server"
+	"github.com/habibiefaried/email-server/internal/storage"
 )
 
 func main() {
@@ -23,6 +24,6 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	be := &server.Backend{}
-	server.RunSMTPServer(fqdn, be)
+	store := storage.NewFileStorage("emails")
+	server.RunSMTPServer(fqdn, store)
 }

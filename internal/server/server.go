@@ -4,9 +4,11 @@ import (
 	"log"
 
 	"github.com/emersion/go-smtp"
+	"github.com/habibiefaried/email-server/internal/storage"
 )
 
-func RunSMTPServer(fqdn string, be *Backend) {
+func RunSMTPServer(fqdn string, store storage.Storage) {
+	be := &Backend{Store: store}
 	s := smtp.NewServer(be)
 	s.Addr = ":25"
 	s.Domain = fqdn
