@@ -2,81 +2,62 @@
 
 A simple SMTP server implementation in Go using the `go-smtp` library.
 
-## Configuration
+## What It Does
 
-### Port
+This server:
+- ✅ Accepts incoming SMTP connections on port 25
+- ✅ Logs sender, recipient, and email body to console
+- ✅ Automatically generates DNS configuration needed for email delivery
+- ⚠️ **Does NOT** store emails or provide IMAP/POP3 access (for testing/learning only)
 
-This server is configured to run on **port 25** (default SMTP port) by default.
+## Quick Start
 
-⚠️ **Important Notes:**
-- Port 25 requires **root/administrator privileges** on Linux/Unix systems
-- On Windows, you may need to run as Administrator if port 25 is already in use
-
-### Running the Server
-
-**On Linux/Unix (requires root):**
+### 1. Build
 ```bash
-sudo go run main.go
+go build -o email-server
 ```
 
-**On Windows (run as Administrator):**
-```
-(Run Command Prompt/PowerShell as Administrator)
-go run main.go
-```
+### 2. Run (Requires root/Administrator)
+```bash
+# Linux/Mac (need sudo for port 25)
+sudo FQDN=mail.yourdomain.com PUBLIC_IP=1.2.3.4 ./email-server
 
-If you get a permission error:
-```
-listen tcp :25: permission denied (or access is denied)
+# Windows (run as Administrator)
+$env:FQDN="mail.yourdomain.com"; $env:PUBLIC_IP="1.2.3.4"; .\email-server.exe
 ```
 
-This means:
-- You don't have root/administrator privileges, OR
-- Port 25 is already in use by another service
-
-## Features
-
-- Accepts incoming SMTP connections
-- Logs sender and recipient information
-- Captures email body content
-- Implements the `go-smtp` backend interface
-
-## DNS Configuration
-
-For external mail delivery, configure:
-
-### A Record
+### 3. Set DNS Records
+The server will print the exact DNS records you need to configure. Example output:
 ```
-mail.yourdomain.com  A  1.2.3.4
+TYPE   | NAME                      | VALUE
+A      | mail.yourdomain.com       | 1.2.3.4
+MX     | yourdomain.com            | mail.yourdomain.com (priority: 10)
+PTR    | 4.3.2.1.in-addr.arpa      | mail.yourdomain.com
 ```
 
-### MX Record
-```
-yourdomain.com  MX  10  mail.yourdomain.com
-```
+## Environment Variables
 
-### PTR Record (Reverse DNS)
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `FQDN` | Yes | Full domain name (e.g., `mail.yourdomain.com`) |
+| `PUBLIC_IP` | No | Public IP where server is running (e.g., `1.2.3.4`) |
 
-PTR records map IP addresses back to hostnames. They're controlled by your **ISP or hosting provider** (not your domain registrar).
+## Port Requirements
 
-**Format for IPv4:**
-```
-[REVERSED_IP].in-addr.arpa  PTR  [hostname]
-```
+- **Port 25**: Default SMTP, requires root/administrator privileges
+- Runs on all interfaces (0.0.0.0:25)
 
-**Example for IP `1.2.3.4`:**
-```
-4.3.2.1.in-addr.arpa  PTR  mail.yourdomain.com
-```
+## Troubleshooting
 
-⚠️ **Note:** The IP octets are **reversed** (1.2.3.4 becomes 4.3.2.1)
+**Error: "permission denied"**
+- You need root (Linux) or Administrator (Windows) privileges
+- Port 25 may already be in use
 
-**Step-by-step:**
-1. Identify your IP: `1.2.3.4`
-2. Reverse the octets: `4.3.2.1`
-3. Add suffix: `4.3.2.1.in-addr.arpa`
-4. Set PTR value to: `mail.yourdomain.com`
-5. Contact your ISP to configure this record in their reverse DNS zone
+**Emails not being received**
+- DNS records (A, MX, PTR) must be configured
+- PTR record is controlled by your ISP
+- Check MX record points to your FQDN
+- Verify A record points to your public IP
 
 **Testing your PTR record:**
 ```bash
