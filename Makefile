@@ -1,4 +1,4 @@
-BINARY=email-server.exe
+BINARY=email-server
 
 all: build
 
