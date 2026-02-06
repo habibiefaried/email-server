@@ -177,6 +177,15 @@ docker-compose logs -f email-server
 docker-compose down
 ```
 
+### Docker Build Notes (gcc/cgo)
+
+The Docker build is configured with `CGO_ENABLED=0`, so it does not require a C compiler. If you previously saw `C compiler "gcc" not found`, rebuild with the latest Dockerfile:
+
+```bash
+docker-compose build --no-cache
+docker-compose up -d
+```
+
 ### Environment Setup with MAIL_SERVERS
 
 Create a `.env` file or set environment variables:
@@ -311,7 +320,7 @@ curl "http://localhost:48080/inbox?name=testuser@example.com" | jq
 
 ### Continuous Integration
 Every commit is automatically tested against:
-- Go 1.22
+- Go 1.25.7
 - PostgreSQL 16 Alpine
 - Ubuntu Latest runner
 - Multiple edge cases and error scenarios

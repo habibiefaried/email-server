@@ -1,6 +1,6 @@
 module github.com/habibiefaried/email-server
 
-go 1.22.4
+go 1.25.7
 
 require github.com/emersion/go-smtp v0.24.0
 
