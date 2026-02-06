@@ -22,11 +22,13 @@ A simple SMTP server in Go using the `go-smtp` library.
 make build
 ```
 
-
-### 2. Run (Requires root/Administrator)
+### 2. Run (Requires root/Administrator for port 25, or use custom SMTP_PORT)
 ```sh
-# Linux/Mac
+# Linux/Mac (requires sudo for port 25)
 sudo MAIL_SERVERS="mail1.example.com,1.2.3.4:mail2.example.com,5.6.7.8" ./email-server.exe
+
+# Or use a custom port (no sudo needed)
+SMTP_PORT=2525 MAIL_SERVERS="mail1.example.com,1.2.3.4" ./email-server
 
 # Windows (run as Administrator)
 $env:MAIL_SERVERS="mail1.example.com,1.2.3.4:mail2.example.com,5.6.7.8"; .\email-server.exe
@@ -40,6 +42,7 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 | Variable      | Required | Description                                                      |
 |---------------|----------|------------------------------------------------------------------|
 | MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint at `/`.       |
+| SMTP_PORT     | No       | (Optional) SMTP server port. Defaults to `25` if not set. Use a high port (2525, 2587, etc.) for non-privileged environments like CI/Docker.       |
 | HTTP_PORT     | No       | (Optional) HTTP health port. Defaults to `48080` if not set.      |
 | DB_URL        | No       | (Optional) PostgreSQL connection string. If provided, emails are saved to both file and database. Format: `user=username password=pass dbname=emaildb host=localhost port=5432 sslmode=disable`       |
 
@@ -235,7 +238,22 @@ If `DB_URL` is provided, both file and database storage are used simultaneously.
 ## CI/CD Pipeline
 
 The project includes a comprehensive GitHub Actions workflow that automatically runs on every push and pull request. The CI pipeline:
+#### Key Features:
+- **Port Configuration:** Uses `SMTP_PORT=2525` to avoid permission denied errors in CI environments
+- **Default SMTP Port:** Server defaults to port 25 (standard SMTP) but accepts `SMTP_PORT` environment variable
+- **Non-Privileged Execution:** Perfect for Docker, CI/CD, and development environments
 
+#### How it works:
+```bash
+# Use default port 25 (requires sudo/root)
+./email-server
+
+# Use custom port for non-privileged environments (CI, Docker, dev)
+SMTP_PORT=2525 ./email-server
+
+# Docker automatically uses port 25 (runs as root inside container)
+docker run -e SMTP_PORT=25 email-server
+```
 ### Automated Tests
 1. **Unit Tests** - Runs all Go unit tests with race detection and coverage reporting
 2. **Integration Tests** - Full end-to-end testing with PostgreSQL

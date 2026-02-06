@@ -7,10 +7,10 @@ import (
 	"github.com/habibiefaried/email-server/internal/storage"
 )
 
-func RunSMTPServer(fqdn string, store storage.Storage) {
+func RunSMTPServer(fqdn string, port string, store storage.Storage) {
 	be := &Backend{Store: store}
 	s := smtp.NewServer(be)
-	s.Addr = ":25"
+	s.Addr = ":" + port
 	s.AllowInsecureAuth = true
 
 	if fqdn != "" {

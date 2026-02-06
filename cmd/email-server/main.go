@@ -69,8 +69,14 @@ func main() {
 		store = fileStore
 	}
 
+	// Get SMTP port from environment variable, default to 25
+	smtpPort := os.Getenv("SMTP_PORT")
+	if smtpPort == "" {
+		smtpPort = "25"
+	}
+
 	// Always run the email server
-	go server.RunSMTPServer(fqdn, store)
+	go server.RunSMTPServer(fqdn, smtpPort, store)
 
 	// HTTP API setup
 	port := os.Getenv("HTTP_PORT")
