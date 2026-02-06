@@ -223,28 +223,7 @@ func (ps *PostgresStorage) GetEmailsByAddress(address string, limit, offset int)
 			email.RawContent = rawContent.String
 		}
 
-		// Fetch attachments for this email
-		attRows, err := ps.db.Query(`
-			SELECT id, filename, content_type, LENGTH(data) as size
-			FROM attachment
-			WHERE email_id = $1
-		`, email.ID)
-		if err != nil {
-			return nil, err
-		}
-
-		attachments := make([]AttachmentInfo, 0) // Initialize as empty slice, not nil
-		for attRows.Next() {
-			var att AttachmentInfo
-			if err := attRows.Scan(&att.ID, &att.Filename, &att.ContentType, &att.Size); err != nil {
-				attRows.Close()
-				return nil, err
-			}
-			attachments = append(attachments, att)
-		}
-		attRows.Close()
-
-		email.Attachments = attachments
+		email.Attachments = make([]AttachmentInfo, 0)
 		emails = append(emails, email)
 	}
 
