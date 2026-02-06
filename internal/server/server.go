@@ -7,15 +7,18 @@ import (
 	"github.com/habibiefaried/email-server/internal/storage"
 )
 
-func RunSMTPServer(fqdn string, store storage.Storage) {
+func RunSMTPServer(fqdn string, port string, store storage.Storage) {
 	be := &Backend{Store: store}
 	s := smtp.NewServer(be)
-	s.Addr = ":25"
-	// s.Domain = "" // Accept all domains
+	s.Addr = ":" + port
 	s.AllowInsecureAuth = true
 
-	log.Printf("Starting SMTP server on %s\n", s.Addr)
-	log.Printf("FQDN: %s\n", fqdn)
+	if fqdn != "" {
+		log.Printf("Starting SMTP server on %s\n", s.Addr)
+		log.Printf("FQDN: %s\n", fqdn)
+	} else {
+		log.Printf("Starting SMTP server on %s (accepting all domains)\n", s.Addr)
+	}
 
 	if err := s.ListenAndServe(); err != nil {
 		log.Fatalf("Failed to start SMTP server: %v", err)
