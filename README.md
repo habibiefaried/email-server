@@ -32,7 +32,8 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 ## Environment Variables
 | Variable      | Required | Description                                                      |
 |---------------|----------|------------------------------------------------------------------|
-| MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint on port `8080` at `/`.       |
+| MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint at `/`.       |
+| HTTP_PORT     | No       | (Optional) HTTP health port. Defaults to `48080` if not set.      |
 
 ## Project Structure
 - `cmd/email-server/main.go` — Entry point
@@ -61,7 +62,7 @@ Should return: your FQDN (e.g., `mail1.example.com`)
 
 ## HTTP Health Endpoint
 
-- The server exposes a simple HTTP API on port `8080`.
+- The server exposes a simple HTTP API on `HTTP_PORT` (default `48080`).
 - `GET /` returns a plain-text status. When `MAIL_SERVERS` is not set it returns `Email server is running`.
 
 

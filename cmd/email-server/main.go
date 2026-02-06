@@ -49,12 +49,17 @@ func main() {
 	go server.RunSMTPServer(fqdn, store)
 
 	// Single HTTP API for status checks
+	port := os.Getenv("HTTP_PORT")
+	if port == "" {
+		port = "48080"
+	}
+	addr := ":" + port
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintln(w, "OK")
 	})
-	log.Printf("Starting HTTP API on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	log.Printf("Starting HTTP API on %s", addr)
+	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("Failed to start HTTP server: %v", err)
 	}
 }
