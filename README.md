@@ -1,5 +1,7 @@
 # Email Server
 
+[![CI](https://github.com/habibiefaried/email-server/actions/workflows/ci.yml/badge.svg)](https://github.com/habibiefaried/email-server/actions/workflows/ci.yml)
+
 A simple SMTP server in Go using the `go-smtp` library.
 
 ## Features
@@ -9,6 +11,8 @@ A simple SMTP server in Go using the `go-smtp` library.
 - Stores emails to disk (file storage)
 - Stores emails to PostgreSQL database with attachment tracking
 - Dual-write capability (file + database simultaneously)
+- HTTP API for fetching emails with pagination support
+- Fully tested with automated CI/CD pipeline
 - Does NOT forward emails (for testing/learning only)
 
 ## Quick Start
@@ -64,10 +68,64 @@ Should return: your FQDN (e.g., `mail1.example.com`)
 
 ## Live Testing & Screenshots
 
-## HTTP Health Endpoint
+## HTTP API Endpoints
 
-- The server exposes a simple HTTP API on `HTTP_PORT` (default `48080`).
-- `GET /` returns a plain-text status. When `MAIL_SERVERS` is not set it returns `Email server is running`.
+The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
+
+### Health Check
+- **Endpoint:** `GET /`
+- **Description:** Returns server health status
+- **Response:** Plain text `OK`
+- **Example:**
+  ```bash
+  curl http://localhost:48080/
+  ```
+
+### Inbox API
+- **Endpoint:** `GET /inbox?name=<email_address>&limit=<n>&offset=<n>`
+- **Description:** Fetch emails for a specific recipient address from PostgreSQL
+- **Query Parameters:**
+  - `name` (required) — Email address to filter by
+  - `limit` (optional) — Number of emails to return (default: 100, max: 1000)
+  - `offset` (optional) — Number of emails to skip (default: 0)
+- **Response:** JSON array of email objects with attachments metadata
+- **CORS:** Enabled for cross-origin requests (React/frontend integration)
+- **Requires:** PostgreSQL storage must be configured (`DB_URL` environment variable)
+- **Examples:**
+  ```bash
+  # Get first 100 emails (default)
+  curl http://localhost:48080/inbox?name=test@example.com
+  
+  # Get first 20 emails
+  curl http://localhost:48080/inbox?name=test@example.com&limit=20
+  
+  # Get next 20 emails (pagination)
+  curl http://localhost:48080/inbox?name=test@example.com&limit=20&offset=20
+  ```
+- **Response Format:**
+  ```json
+  [
+    {
+      "id": 1,
+      "from": "sender@example.com",
+      "to": "test@example.com",
+      "subject": "Test Email",
+      "date": "Wed, 5 Feb 2026 10:30:00 +0000",
+      "body": "Email body content (HTML-ready)",
+      "created_at": "2026-02-06T08:30:00Z",
+      "attachments": [
+        {
+          "id": 1,
+          "filename": "document.pdf",
+          "content_type": "application/pdf",
+          "size": 52480
+        }
+      ]
+    }
+  ]
+  ```
+
+**Note:** The API supports pagination through `limit` and `offset` parameters. By default, it returns the latest 100 emails for the specified address, ordered by creation time (newest first). Maximum limit is 1000 emails per request. The `body` field contains the parsed email body ready for HTML rendering in React.js or other frontends.
 
 
 Below are real-world screenshots and explanations of the server in action:
@@ -173,3 +231,69 @@ When `DB_URL` is set, emails are saved to PostgreSQL in addition to files.
 
 ### Composite Storage
 If `DB_URL` is provided, both file and database storage are used simultaneously. If PostgreSQL connection fails, the server falls back to file-only storage with a warning.
+
+## CI/CD Pipeline
+
+The project includes a comprehensive GitHub Actions workflow that automatically runs on every push and pull request. The CI pipeline:
+
+### Automated Tests
+1. **Unit Tests** - Runs all Go unit tests with race detection and coverage reporting
+2. **Integration Tests** - Full end-to-end testing with PostgreSQL
+3. **API Testing** - Comprehensive curl-based tests including:
+
+#### Test Coverage:
+- ✅ Health check endpoint validation
+- ✅ Valid email addresses with data
+- ✅ Non-existent addresses (empty results)
+- ✅ Missing required parameters (400 error)
+- ✅ Pagination with limit parameter
+- ✅ Pagination with offset parameter
+- ✅ Invalid/malformed parameters
+- ✅ Negative offsets handling
+- ✅ Excessive limit values
+- ✅ Attachment metadata validation
+- ✅ Empty email addresses
+- ✅ CORS headers verification
+- ✅ Custom generated emails (5 unique scenarios)
+- ✅ Special characters and Unicode handling
+- ✅ Long content storage and retrieval
+- ✅ Multi-recipient email isolation
+
+### Test Data
+The CI pipeline automatically:
+1. Starts PostgreSQL service
+2. Loads sample emails via SMTP (gmail.txt, anonymousemail.txt, attachments.txt)
+3. Generates 5 custom test emails with dynamic content:
+   - Simple text email
+   - HTML content email
+   - Special characters (Unicode, emojis)
+   - Different recipients for isolation testing
+   - Long content (50+ lines) for stress testing
+4. Verifies data integrity and API responses
+5. Tests edge cases and error scenarios
+
+### Running Tests Locally
+```bash
+# Run unit tests
+go test ./... -v -race
+
+# Run with coverage
+go test ./... -coverprofile=coverage.out
+go tool cover -html=coverage.out
+
+# Generate and send test emails (requires swaks)
+# Install swaks: brew install swaks (macOS) or apt-get install swaks (Linux)
+./scripts/test-emails.sh localhost 25
+
+# Then verify via API
+curl "http://localhost:48080/inbox?name=testuser@example.com" | jq
+```
+
+### Continuous Integration
+Every commit is automatically tested against:
+- Go 1.22
+- PostgreSQL 16 Alpine
+- Ubuntu Latest runner
+- Multiple edge cases and error scenarios
+
+The pipeline ensures code quality and prevents regressions before merging.

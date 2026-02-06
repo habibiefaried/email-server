@@ -150,6 +150,96 @@ func (ps *PostgresStorage) Save(email Email) (string, error) {
 	return filename, nil
 }
 
+// EmailWithAttachments represents an email with its attachments for API responses
+type EmailWithAttachments struct {
+	ID          int              `json:"id"`
+	From        string           `json:"from"`
+	To          string           `json:"to"`
+	Subject     string           `json:"subject"`
+	Date        string           `json:"date"`
+	Body        string           `json:"body"`
+	RawContent  string           `json:"raw_content,omitempty"`
+	CreatedAt   time.Time        `json:"created_at"`
+	Attachments []AttachmentInfo `json:"attachments"`
+}
+
+// AttachmentInfo represents attachment metadata (without binary data by default)
+type AttachmentInfo struct {
+	ID          int    `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int    `json:"size"`
+}
+
+// GetEmailsByAddress fetches emails for a specific recipient address with pagination
+func (ps *PostgresStorage) GetEmailsByAddress(address string, limit, offset int) ([]EmailWithAttachments, error) {
+	// Query emails
+	rows, err := ps.db.Query(`
+		SELECT id, "from", "to", subject, date, body, raw_content, created_at
+		FROM email
+		WHERE "to" = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`, address, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var emails []EmailWithAttachments
+	for rows.Next() {
+		var email EmailWithAttachments
+		var rawContent sql.NullString
+		err := rows.Scan(
+			&email.ID,
+			&email.From,
+			&email.To,
+			&email.Subject,
+			&email.Date,
+			&email.Body,
+			&rawContent,
+			&email.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if rawContent.Valid {
+			email.RawContent = rawContent.String
+		}
+
+		// Fetch attachments for this email
+		attRows, err := ps.db.Query(`
+			SELECT id, filename, content_type, LENGTH(data) as size
+			FROM attachment
+			WHERE email_id = $1
+		`, email.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		var attachments []AttachmentInfo
+		for attRows.Next() {
+			var att AttachmentInfo
+			if err := attRows.Scan(&att.ID, &att.Filename, &att.ContentType, &att.Size); err != nil {
+				attRows.Close()
+				return nil, err
+			}
+			attachments = append(attachments, att)
+		}
+		attRows.Close()
+
+		email.Attachments = attachments
+		emails = append(emails, email)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return emails, nil
+}
+
 // Close closes the database connection
 func (ps *PostgresStorage) Close() error {
 	if ps.db != nil {

@@ -8,8 +8,6 @@ services:
       POSTGRES_USER: emailuser
       POSTGRES_PASSWORD: emailpass
       POSTGRES_DB: emaildb
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
