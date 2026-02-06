@@ -7,7 +7,7 @@ services:
     env_file:
       - .env
     ports:
-      - "2525:2525"
+      - "25:2525"
       - "48080:48080"
     volumes:
       - ./emails:/root/emails

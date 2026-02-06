@@ -8,9 +8,8 @@ A simple SMTP server in Go using the `go-smtp` library.
 - Accepts SMTP connections on port 25
 - Logs sender, recipient, and email body to console
 - Prints required DNS records for mail delivery
-- Stores emails to disk (file storage)
 - Stores emails to PostgreSQL database with attachment tracking
-- Dual-write capability (file + database simultaneously)
+- Fallback to file storage when database is unavailable
 - HTTP API for fetching emails with pagination support
 - Fully tested with automated CI/CD pipeline
 - Does NOT forward emails (for testing/learning only)
@@ -44,7 +43,7 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 | MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint at `/`.       |
 | SMTP_PORT     | No       | (Optional) SMTP server port. Defaults to `2525` if not set. Use port `25` for production or when running as root.       |
 | HTTP_PORT     | No       | (Optional) HTTP health port. Defaults to `48080` if not set.      |
-| DB_URL        | No       | (Optional) PostgreSQL connection string (works with Neon, AWS RDS, or any PostgreSQL). If provided, emails are saved to both file and database. Format: `user=username password=pass dbname=emaildb host=hostname port=5432 sslmode=require`       |
+| DB_URL        | No       | (Optional) PostgreSQL connection string (works with Neon, AWS RDS, or any PostgreSQL). If provided, emails are saved to database only. Falls back to file storage if connection fails. Format: `user=username password=pass dbname=emaildb host=hostname port=5432 sslmode=require`       |
 
 **Note:** For Neon PostgreSQL, always use `sslmode=require`. For local PostgreSQL, you can use `sslmode=disable`.
 
@@ -260,14 +259,13 @@ Stores email attachments:
 
 ## Storage Options
 
-### File Storage (Default)
-Emails are saved to `emails/<to>/<from>/timestamp.txt`. This is always enabled.
+### PostgreSQL Storage (Primary)
+When `DB_URL` is set, emails are saved exclusively to PostgreSQL database. This is the recommended mode for production use.
 
-### PostgreSQL Storage (Optional)
-When `DB_URL` is set, emails are saved to PostgreSQL in addition to files.
-
-### Composite Storage
-If `DB_URL` is provided, both file and database storage are used simultaneously. If PostgreSQL connection fails, the server falls back to file-only storage with a warning.
+### File Storage (Fallback)
+Emails are saved to `emails/<to>/<from>/timestamp.txt` only when:
+- `DB_URL` is not provided, or
+- PostgreSQL connection fails (automatic fallback with warning)
 
 ## CI/CD Pipeline
 

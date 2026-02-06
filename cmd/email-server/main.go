@@ -46,10 +46,7 @@ func main() {
 		log.Printf("MAIL_SERVERS not set — Email server is running without FQDN")
 	}
 
-	// Initialize storage backends
-	fileStore := storage.NewFileStorage("emails")
-
-	// Try to initialize postgres storage if DB_URL is provided
+	// Initialize storage backend
 	var store storage.Storage
 	var pgStore *storage.PostgresStorage
 	dbURL := os.Getenv("DB_URL")
@@ -59,14 +56,14 @@ func main() {
 		if err != nil {
 			log.Printf("Warning: Failed to connect to postgres: %v", err)
 			log.Printf("Falling back to file-only storage")
-			store = fileStore
+			store = storage.NewFileStorage("emails")
 		} else {
-			log.Printf("Postgres storage initialized, using composite storage")
-			store = storage.NewCompositeStorage(fileStore, pgStore)
+			log.Printf("PostgreSQL storage initialized (database-only mode)")
+			store = pgStore
 		}
 	} else {
 		log.Printf("DB_URL not set, using file-only storage")
-		store = fileStore
+		store = storage.NewFileStorage("emails")
 	}
 
 	// Get SMTP port from environment variable, default to 2525
