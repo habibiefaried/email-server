@@ -339,12 +339,15 @@ jobs:
       - name: Test API - CORS headers
         run: |
           echo "Testing CORS headers..."
-          headers=$(curl -s -I "http://localhost:48080/inbox?name=admin@test.milahabibie.com")
+          headers=$(curl -s -i "http://localhost:48080/inbox?name=admin@test.milahabibie.com" | head -20)
           
           if echo "$headers" | grep -qi "Access-Control-Allow-Origin"; then
             echo "✓ CORS headers present"
+            echo "$headers" | grep -i "Access-Control"
           else
             echo "✗ CORS headers missing"
+            echo "Response headers:"
+            echo "$headers"
             exit 1
           fi
 

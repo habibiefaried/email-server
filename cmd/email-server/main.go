@@ -98,6 +98,12 @@ func main() {
 			return
 		}
 
+		// Set CORS headers immediately
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Content-Type", "application/json")
+
 		// Check if postgres is available
 		if pgStore == nil {
 			http.Error(w, "Postgres storage not configured", http.StatusServiceUnavailable)
@@ -135,12 +141,7 @@ func main() {
 			return
 		}
 
-		// Return JSON response with CORS headers for React frontend
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
+		// Return JSON response
 		if err := json.NewEncoder(w).Encode(emails); err != nil {
 			log.Printf("Error encoding JSON: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
