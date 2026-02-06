@@ -32,7 +32,7 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 ## Environment Variables
 | Variable      | Required | Description                                                      |
 |---------------|----------|------------------------------------------------------------------|
-| MAIL_SERVERS  | Yes      | List of FQDN,IP pairs separated by `:` (see example above)        |
+| MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint on port `8080` at `/`.       |
 
 ## Project Structure
 - `cmd/email-server/main.go` — Entry point
@@ -58,6 +58,12 @@ Should return: your FQDN (e.g., `mail1.example.com`)
 **Why it matters:** Many mail servers check PTR records to verify sender legitimacy. Without proper PTR records, your emails are more likely to be marked as spam.
 
 ## Live Testing & Screenshots
+
+## HTTP Health Endpoint
+
+- The server exposes a simple HTTP API on port `8080`.
+- `GET /` returns a plain-text status. When `MAIL_SERVERS` is not set it returns `Email server is running`.
+
 
 Below are real-world screenshots and explanations of the server in action:
 

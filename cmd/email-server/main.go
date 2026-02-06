@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 
@@ -12,31 +14,47 @@ import (
 
 func main() {
 	mailServers := os.Getenv("MAIL_SERVERS")
-	if mailServers == "" {
-		log.Fatalf("MAIL_SERVERS env var is required, format: fqdn,ip[:fqdn2,ip2...] e.g. test.mail.com,1.2.3.4:another.mail.com,5.6.7.8")
-	}
-	pairs := strings.Split(mailServers, ":")
-	for _, pair := range pairs {
-		fields := strings.Split(pair, ",")
-		if len(fields) != 2 {
-			log.Fatalf("Invalid MAIL_SERVERS entry: %s", pair)
+	var fqdn string
+
+	if mailServers != "" {
+		pairs := strings.Split(mailServers, ":")
+
+		for _, pair := range pairs {
+			fields := strings.Split(pair, ",")
+			if len(fields) != 2 {
+				log.Fatalf("Invalid MAIL_SERVERS entry: %s", pair)
+			}
+			fqdnVal := fields[0]
+			ip := fields[1]
+			if err := dnsutil.ValidateFQDN(fqdnVal); err != nil {
+				log.Fatalf("Invalid FQDN: %v", err)
+			}
+			if err := dnsutil.ValidateIPv4(ip); err != nil {
+				log.Fatalf("Invalid IP: %v", err)
+			}
+			if err := dnsutil.PrintDNSRecords(fqdnVal, ip); err != nil {
+				log.Fatalf("Configuration error for %s,%s: %v", fqdnVal, ip, err)
+			}
 		}
-		fqdn := fields[0]
-		ip := fields[1]
-		if err := dnsutil.ValidateFQDN(fqdn); err != nil {
-			log.Fatalf("Invalid FQDN: %v", err)
-		}
-		if err := dnsutil.ValidateIPv4(ip); err != nil {
-			log.Fatalf("Invalid IP: %v", err)
-		}
-		if err := dnsutil.PrintDNSRecords(fqdn, ip); err != nil {
-			log.Fatalf("Configuration error for %s,%s: %v", fqdn, ip, err)
-		}
+
+		// Use the first FQDN for the SMTP server
+		fields := strings.Split(pairs[0], ",")
+		fqdn = fields[0]
+	} else {
+		log.Printf("MAIL_SERVERS not set — Email server is running without FQDN")
 	}
 
-	// Use the first FQDN for the SMTP server
-	fields := strings.Split(pairs[0], ",")
-	fqdn := fields[0]
+	// Always run the email server
 	store := storage.NewFileStorage("emails")
-	server.RunSMTPServer(fqdn, store)
+	go server.RunSMTPServer(fqdn, store)
+
+	// Single HTTP API for status checks
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprintln(w, "OK")
+	})
+	log.Printf("Starting HTTP API on :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatalf("Failed to start HTTP server: %v", err)
+	}
 }
