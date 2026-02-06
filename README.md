@@ -22,15 +22,15 @@ A simple SMTP server in Go using the `go-smtp` library.
 make build
 ```
 
-### 2. Run (Requires root/Administrator for port 25, or use custom SMTP_PORT)
+### 2. Run (No root required by default)
 ```sh
-# Linux/Mac (requires sudo for port 25)
-sudo MAIL_SERVERS="mail1.example.com,1.2.3.4:mail2.example.com,5.6.7.8" ./email-server.exe
+# Linux/Mac - uses default port 2525 (no sudo needed)
+MAIL_SERVERS="mail1.example.com,1.2.3.4:mail2.example.com,5.6.7.8" ./email-server.exe
 
-# Or use a custom port (no sudo needed)
-SMTP_PORT=2525 MAIL_SERVERS="mail1.example.com,1.2.3.4" ./email-server
+# Or use port 25 (requires sudo)
+sudo SMTP_PORT=25 MAIL_SERVERS="mail1.example.com,1.2.3.4" ./email-server
 
-# Windows (run as Administrator)
+# Windows (no administrator required by default)
 $env:MAIL_SERVERS="mail1.example.com,1.2.3.4:mail2.example.com,5.6.7.8"; .\email-server.exe
 ```
 
@@ -42,7 +42,7 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 | Variable      | Required | Description                                                      |
 |---------------|----------|------------------------------------------------------------------|
 | MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint at `/`.       |
-| SMTP_PORT     | No       | (Optional) SMTP server port. Defaults to `25` if not set. Use a high port (2525, 2587, etc.) for non-privileged environments like CI/Docker.       |
+| SMTP_PORT     | No       | (Optional) SMTP server port. Defaults to `2525` if not set. Use port `25` for production or when running as root.       |
 | HTTP_PORT     | No       | (Optional) HTTP health port. Defaults to `48080` if not set.      |
 | DB_URL        | No       | (Optional) PostgreSQL connection string. If provided, emails are saved to both file and database. Format: `user=username password=pass dbname=emaildb host=localhost port=5432 sslmode=disable`       |
 
@@ -194,7 +194,8 @@ docker-compose up -d
 
 ```bash
 docker build -t email-server .
-docker run -p 25:25 -p 48080:48080 \
+docker run -p 25:2525 -p 48080:48080 \
+  -e SMTP_PORT=2525 \
   -e DB_URL="user=emailuser password=emailpass dbname=emaildb host=postgres port=5432 sslmode=disable" \
   -e MAIL_SERVERS="mail.example.com,1.2.3.4" \
   email-server
@@ -239,9 +240,10 @@ If `DB_URL` is provided, both file and database storage are used simultaneously.
 
 The project includes a comprehensive GitHub Actions workflow that automatically runs on every push and pull request. The CI pipeline:
 #### Key Features:
-- **Port Configuration:** Uses `SMTP_PORT=2525` to avoid permission denied errors in CI environments
-- **Default SMTP Port:** Server defaults to port 25 (standard SMTP) but accepts `SMTP_PORT` environment variable
-- **Non-Privileged Execution:** Perfect for Docker, CI/CD, and development environments
+- **Default SMTP Port:** 2525 (no root required, development-friendly)
+- **Port Mapping:** In Docker, maps `25:2525` (external:internal)
+- **Custom Ports:** Use `SMTP_PORT` environment variable to override default
+- **Production Ready:** Set `SMTP_PORT=25` with root privileges for standard SMTP port
 
 #### How it works:
 ```bash

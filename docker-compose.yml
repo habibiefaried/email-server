@@ -28,10 +28,11 @@ services:
         condition: service_healthy
     environment:
       MAIL_SERVERS: ${MAIL_SERVERS:-}
+      SMTP_PORT: 2525
       HTTP_PORT: 48080
       DB_URL: "user=emailuser password=emailpass dbname=emaildb host=postgres port=5432 sslmode=disable"
     ports:
-      - "25:25"
+      - "25:2525"
       - "48080:48080"
     volumes:
       - ./emails:/root/emails
