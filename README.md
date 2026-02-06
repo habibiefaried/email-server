@@ -88,21 +88,21 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
   ```
 
 ### Inbox API (Summary List)
-- **Endpoint:** `GET /inbox?email=<address>&offset=<n>`
+- **Endpoint:** `GET /inbox?email=<address>&page=<n>`
 - **Description:** Fetch email summaries (no body or attachments) for a recipient, sorted by received timestamp descending
 - **Query Parameters:**
   - `email` (required) — Recipient email address to filter by
-  - `offset` (optional) — Number of emails to skip (default: 0)
-- **Response:** JSON array of up to **10** email summaries per page
+  - `page` (optional) — Page number, 1-based (default: 1). Each page returns 5 emails.
+- **Response:** JSON array of up to **5** email summaries per page
 - **CORS:** Enabled for cross-origin requests (React/frontend integration)
 - **Requires:** PostgreSQL storage must be configured (`DB_URL` environment variable)
 - **Examples:**
   ```bash
-  # Get latest 10 emails
+  # Get latest 5 emails (page 1)
   curl http://localhost:48080/inbox?email=test@example.com
   
-  # Get next 10 emails (page 2)
-  curl http://localhost:48080/inbox?email=test@example.com&offset=10
+  # Get emails 6-10 (page 2)
+  curl http://localhost:48080/inbox?email=test@example.com&page=2
   ```
 - **Response Format:**
   ```json
@@ -120,10 +120,10 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
 
 ### Email Detail API
 - **Endpoint:** `GET /email?id=<uuidv7>`
-- **Description:** Fetch full email detail including body, HTML body, and attachment metadata by UUIDv7 ID
+- **Description:** Fetch full email detail including body (HTML-rendered), HTML body, raw content, and attachments (with base64 data) by UUIDv7 ID. If no parsed body/HTML is available, the raw email content is re-parsed and converted to HTML automatically.
 - **Query Parameters:**
   - `id` (required) — UUIDv7 of the email
-- **Response:** JSON object with full email content and attachment metadata
+- **Response:** JSON object with full email content and attachment data
 - **CORS:** Enabled for cross-origin requests
 - **Examples:**
   ```bash
@@ -138,7 +138,7 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
     "to": "test@example.com",
     "subject": "Test Email",
     "date": "Wed, 5 Feb 2026 10:30:00 +0000",
-    "body": "Email body content (base64 decoded, HTML-ready)",
+    "body": "<!DOCTYPE html><html>...rendered HTML...</html>",
     "html_body": "<html>...</html>",
     "created_at": "2026-02-06T08:30:00Z",
     "attachments": [
@@ -146,13 +146,14 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
         "id": "0194d3f0-7e1b-7c34-8b2e-1a2b3c4d5e6f",
         "filename": "document.pdf",
         "content_type": "application/pdf",
-        "size": 52480
+        "size": 52480,
+        "data": "JVBERi0xLjQK...base64-encoded..."
       }
     ]
   }
   ```
 
-**Note:** The `/inbox` endpoint returns **10 emails per page** (no body or attachments) for fast listing. Use `/email?id=<uuid>` to fetch the full content of a specific email. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
+**Note:** The `/inbox` endpoint returns **5 emails per page** (no body or attachments) for fast listing. Use `/email?id=<uuid>` to fetch the full content of a specific email including base64-encoded attachment data. If body/HTML are empty, the server re-parses `raw_content` and generates HTML automatically. Plain text bodies are wrapped in a basic HTML template. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
 
 
 Below are real-world screenshots and explanations of the server in action:
@@ -321,8 +322,8 @@ docker run -e SMTP_PORT=25 email-server
 - ✅ Valid email addresses with data
 - ✅ Non-existent addresses (empty results)
 - ✅ Missing required parameters (400 error)
-- ✅ Pagination with offset parameter
-- ✅ Negative offsets handling
+- ✅ Pagination with page parameter
+- ✅ Negative page handling
 - ✅ Empty email addresses
 - ✅ CORS headers verification
 - ✅ Email detail by UUIDv7 (`/email?id=`)

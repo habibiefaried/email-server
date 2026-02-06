@@ -93,7 +93,7 @@ func TestEmailDetail_HasBodyAndAttachments(t *testing.T) {
 		HTMLBody:    "<p>Hello</p>",
 		RawContent:  "raw data",
 		CreatedAt:   time.Now(),
-		Attachments: []AttachmentInfo{{ID: generateUUIDv7(), Filename: "file.txt", ContentType: "text/plain", Size: 100}},
+		Attachments: []AttachmentInfo{{ID: generateUUIDv7(), Filename: "file.txt", ContentType: "text/plain", Size: 100, Data: "SGVsbG8gV29ybGQ="}},
 	}
 	if d.Body == "" {
 		t.Error("EmailDetail Body should not be empty")
@@ -112,6 +112,7 @@ func TestAttachmentInfo_UUIDv7ID(t *testing.T) {
 		Filename:    "test.png",
 		ContentType: "image/png",
 		Size:        1024,
+		Data:        "iVBORw0KGgo=",
 	}
 	parsed, err := uuid.Parse(a.ID)
 	if err != nil {
@@ -120,4 +121,42 @@ func TestAttachmentInfo_UUIDv7ID(t *testing.T) {
 	if parsed.Version() != 7 {
 		t.Errorf("Expected UUID version 7, got %d", parsed.Version())
 	}
+	if a.Data == "" {
+		t.Error("Attachment Data should not be empty")
+	}
+}
+
+func TestPlainTextToHTML(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string // substring that must be present
+	}{
+		{"simple text", "Hello World", "Hello World"},
+		{"multiline", "Line 1\nLine 2", "<br>"},
+		{"html escaping", "a < b & c > d", "a &lt; b &amp; c &gt; d"},
+		{"url linkify", "Visit https://example.com today", `<a href="https://example.com">`},
+		{"wraps in html", "test", "<!DOCTYPE html>"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := plainTextToHTML(tc.input)
+			if !contains(result, tc.want) {
+				t.Errorf("plainTextToHTML(%q) = %q, want substring %q", tc.input, result, tc.want)
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && containsHelper(s, substr)
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

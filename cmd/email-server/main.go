@@ -88,7 +88,7 @@ func main() {
 		fmt.Fprintln(w, "OK")
 	})
 
-	// Inbox API endpoint (summary list, 10 per page)
+	// Inbox API endpoint (summary list, 5 per page)
 	http.HandleFunc("/inbox", func(w http.ResponseWriter, r *http.Request) {
 		// Set CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -120,16 +120,16 @@ func main() {
 			return
 		}
 
-		// Get offset parameter (default 0)
-		offset := 0
-		if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
-			if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
-				offset = parsedOffset
+		// Get page parameter (default 1)
+		page := 1
+		if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+			if parsedPage, err := strconv.Atoi(pageStr); err == nil && parsedPage >= 1 {
+				page = parsedPage
 			}
 		}
 
-		// Fetch email summaries (10 per page, no body/attachments)
-		emails, err := pgStore.GetInbox(address, offset)
+		// Fetch email summaries (5 per page, no body/attachments)
+		emails, err := pgStore.GetInbox(address, page)
 		if err != nil {
 			log.Printf("Error fetching inbox for %s: %v", address, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)

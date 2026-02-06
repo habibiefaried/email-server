@@ -2,7 +2,11 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/base64"
+	"fmt"
+	"html"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -191,26 +195,30 @@ type EmailDetail struct {
 	Attachments []AttachmentInfo `json:"attachments"`
 }
 
-// AttachmentInfo represents attachment metadata
+// AttachmentInfo represents attachment metadata and data
 type AttachmentInfo struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Size        int    `json:"size"`
+	Data        string `json:"data"` // base64-encoded attachment data
 }
 
-// GetInbox fetches email summaries for a recipient (10 per page, offset only)
-func (ps *PostgresStorage) GetInbox(address string, offset int) ([]EmailSummary, error) {
-	if offset < 0 {
-		offset = 0
+// GetInbox fetches email summaries for a recipient (5 per page).
+// The page parameter is 1-based: page=1 returns rows 1-5, page=2 returns rows 6-10, etc.
+func (ps *PostgresStorage) GetInbox(address string, page int) ([]EmailSummary, error) {
+	if page < 1 {
+		page = 1
 	}
+	const pageSize = 5
+	sqlOffset := (page - 1) * pageSize
 	rows, err := ps.db.Query(`
 		SELECT id, "from", "to", COALESCE(subject, ''), COALESCE(date, ''), created_at
 		FROM email
 		WHERE "to" = $1
 		ORDER BY created_at DESC
-		LIMIT 10 OFFSET $2
-	`, address, offset)
+		LIMIT $2 OFFSET $3
+	`, address, pageSize, sqlOffset)
 	if err != nil {
 		return nil, err
 	}
@@ -256,8 +264,32 @@ func (ps *PostgresStorage) GetEmailByID(id string) (*EmailDetail, error) {
 		email.RawContent = rawContent.String
 	}
 
+	// If body is empty, try to parse raw_content and generate HTML
+	if email.Body == "" && email.HTMLBody == "" && email.RawContent != "" {
+		if parsed, err := parser.Parse(email.RawContent); err == nil {
+			if parsed.HTMLBody != "" {
+				email.HTMLBody = parsed.HTMLBody
+				email.Body = parsed.HTMLBody
+			} else if parsed.Body != "" {
+				email.Body = plainTextToHTML(parsed.Body)
+				email.HTMLBody = email.Body
+			}
+		}
+	}
+
+	// If we have HTMLBody but no Body, use HTMLBody as Body
+	if email.Body == "" && email.HTMLBody != "" {
+		email.Body = email.HTMLBody
+	}
+
+	// If we still only have plain text Body and no HTMLBody, convert to HTML
+	if email.Body != "" && email.HTMLBody == "" {
+		email.HTMLBody = plainTextToHTML(email.Body)
+		email.Body = email.HTMLBody
+	}
+
 	attRows, err := ps.db.Query(`
-		SELECT id, filename, COALESCE(content_type, ''), COALESCE(length(data), 0)
+		SELECT id, filename, COALESCE(content_type, ''), COALESCE(length(data), 0), data
 		FROM attachment WHERE email_id = $1
 	`, id)
 	if err != nil {
@@ -268,8 +300,12 @@ func (ps *PostgresStorage) GetEmailByID(id string) (*EmailDetail, error) {
 	email.Attachments = make([]AttachmentInfo, 0)
 	for attRows.Next() {
 		var att AttachmentInfo
-		if err := attRows.Scan(&att.ID, &att.Filename, &att.ContentType, &att.Size); err != nil {
+		var rawData []byte
+		if err := attRows.Scan(&att.ID, &att.Filename, &att.ContentType, &att.Size, &rawData); err != nil {
 			return nil, err
+		}
+		if rawData != nil {
+			att.Data = base64.StdEncoding.EncodeToString(rawData)
 		}
 		email.Attachments = append(email.Attachments, att)
 	}
@@ -283,4 +319,22 @@ func (ps *PostgresStorage) Close() error {
 		return ps.db.Close()
 	}
 	return nil
+}
+
+// plainTextToHTML converts plain text email body to HTML
+func plainTextToHTML(text string) string {
+	escaped := html.EscapeString(text)
+	// Convert URLs to clickable links
+	lines := strings.Split(escaped, "\n")
+	for i, line := range lines {
+		words := strings.Fields(line)
+		for j, word := range words {
+			if strings.HasPrefix(word, "http://") || strings.HasPrefix(word, "https://") {
+				words[j] = fmt.Sprintf(`<a href="%s">%s</a>`, word, word)
+			}
+		}
+		lines[i] = strings.Join(words, " ")
+	}
+	body := strings.Join(lines, "<br>\n")
+	return fmt.Sprintf(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family:sans-serif;padding:16px;white-space:pre-wrap;">%s</body></html>`, body)
 }

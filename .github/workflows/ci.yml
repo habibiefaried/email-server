@@ -299,31 +299,31 @@ jobs:
             exit 1
           fi
 
-      - name: Test API - Pagination with offset
+      - name: Test API - Pagination with page
         run: |
-          echo "Testing pagination with offset=1..."
-          response=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com&offset=1")
+          echo "Testing pagination with page=2 (page 2, should be empty since only 2 emails fit on page 1)..."
+          response=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com&page=2")
           count=$(echo "$response" | jq '. | length')
           
-          if [ "$count" -eq 1 ]; then
-            echo "✓ Offset parameter works correctly (got remaining 1 email)"
+          if [ "$count" -eq 0 ]; then
+            echo "✓ Offset parameter works correctly (page 2 is empty)"
           else
-            echo "✗ Expected 1 email with offset=1, got $count"
+            echo "✗ Expected 0 emails on page 2, got $count"
             echo "Response: $response"
             exit 1
           fi
 
-      - name: Test API - Negative offset
+      - name: Test API - Negative page
         run: |
-          echo "Testing negative offset (should be ignored/default to 0)..."
-          response=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com&offset=-5")
+          echo "Testing negative page (should default to page 1)..."
+          response=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com&page=-5")
           count=$(echo "$response" | jq '. | length')
           
-          # Should fall back to offset 0 and return all emails
+          # Should fall back to page 1 and return all emails
           if [ "$count" -eq 2 ]; then
-            echo "✓ Negative offset handled correctly"
+            echo "✓ Negative page handled correctly (defaults to page 1)"
           else
-            echo "✗ Expected 2 emails with negative offset, got $count"
+            echo "✗ Expected 2 emails with negative page, got $count"
             exit 1
           fi
 
@@ -342,11 +342,20 @@ jobs:
               found_attachments=true
               echo "✓ Found email with $att_count attachment(s): $id"
               
-              # Verify attachment structure
-              if echo "$detail" | jq -e '.attachments[0] | has("id", "filename", "content_type", "size")' > /dev/null; then
-                echo "✓ Attachment metadata structure is valid"
+              # Verify attachment structure (including base64 data)
+              if echo "$detail" | jq -e '.attachments[0] | has("id", "filename", "content_type", "size", "data")' > /dev/null; then
+                echo "✓ Attachment structure is valid (includes data field)"
               else
-                echo "✗ Attachment metadata structure is invalid"
+                echo "✗ Attachment structure is invalid (missing data field)"
+                exit 1
+              fi
+              
+              # Verify attachment data is non-empty base64 string
+              att_data=$(echo "$detail" | jq -r '.attachments[0].data')
+              if [ -n "$att_data" ] && [ "$att_data" != "null" ]; then
+                echo "✓ Attachment data is present (base64, ${#att_data} chars)"
+              else
+                echo "✗ Attachment data is empty or null"
                 exit 1
               fi
               
