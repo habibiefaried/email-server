@@ -92,38 +92,48 @@ func Parse(rawContent string) (*Email, error) {
 
 			body, _ := io.ReadAll(part)
 
+			transferEncoding := strings.ToLower(part.Header.Get("Content-Transfer-Encoding"))
 			if (strings.HasPrefix(disposition, "attachment") ||
 				(strings.HasPrefix(disposition, "inline") && filename != "")) &&
 				filename != "" {
-				transferEncoding := strings.ToLower(part.Header.Get("Content-Transfer-Encoding"))
 				var data []byte
 				if strings.Contains(transferEncoding, "base64") {
 					data, _ = base64.StdEncoding.DecodeString(string(body))
 				} else {
 					data = body
 				}
-
 				parsed.Attachments = append(parsed.Attachments, Attachment{
 					Filename:    filename,
 					ContentType: partMediaType,
 					Data:        data,
 				})
 			} else if strings.HasPrefix(partMediaType, "text/") {
-				// Extract both plain text and HTML versions
+				var decodedBody []byte
+				if strings.Contains(transferEncoding, "base64") {
+					decodedBody, _ = base64.StdEncoding.DecodeString(string(body))
+				} else {
+					decodedBody = body
+				}
 				if strings.HasPrefix(partMediaType, "text/html") {
-					parsed.HTMLBody = string(body)
+					parsed.HTMLBody = string(decodedBody)
 				} else if strings.HasPrefix(partMediaType, "text/plain") {
-					parsed.Body = string(body)
+					parsed.Body = string(decodedBody)
 				}
 			}
 		}
 	} else {
 		body, _ := io.ReadAll(msg.Body)
-		// For non-multipart emails, assign based on content type
-		if strings.HasPrefix(mediaType, "text/html") {
-			parsed.HTMLBody = string(body)
+		transferEncoding := strings.ToLower(msg.Header.Get("Content-Transfer-Encoding"))
+		var decodedBody []byte
+		if strings.Contains(transferEncoding, "base64") {
+			decodedBody, _ = base64.StdEncoding.DecodeString(string(body))
 		} else {
-			parsed.Body = string(body)
+			decodedBody = body
+		}
+		if strings.HasPrefix(mediaType, "text/html") {
+			parsed.HTMLBody = string(decodedBody)
+		} else {
+			parsed.Body = string(decodedBody)
 		}
 	}
 

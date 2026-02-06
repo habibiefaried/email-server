@@ -173,7 +173,7 @@ jobs:
       - name: Test API - Valid address with data
         run: |
           echo "Testing valid address: admin@test.milahabibie.com (should have 2 emails)..."
-          response=$(curl -s "http://localhost:48080/inbox?name=admin@test.milahabibie.com")
+          response=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com")
           count=$(echo "$response" | jq '. | length')
           
           if [ "$count" -eq 2 ]; then
@@ -184,18 +184,85 @@ jobs:
             exit 1
           fi
           
-          # Verify email structure
-          if echo "$response" | jq -e '.[0] | has("id", "from", "to", "subject", "body", "created_at", "attachments")' > /dev/null; then
-            echo "✓ Email structure is valid"
+          # Verify inbox summary structure (no body/attachments)
+          if echo "$response" | jq -e '.[0] | has("id", "from", "to", "subject", "created_at")' > /dev/null; then
+            echo "✓ Inbox summary structure is valid"
           else
-            echo "✗ Email structure is invalid"
+            echo "✗ Inbox summary structure is invalid"
+            exit 1
+          fi
+          
+          # Verify id is UUIDv7 format (8-4-4-4-12 hex with version 7)
+          id=$(echo "$response" | jq -r '.[0].id')
+          if echo "$id" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'; then
+            echo "✓ ID is valid UUIDv7 format: $id"
+          else
+            echo "✗ ID is not valid UUIDv7 format: $id"
+            exit 1
+          fi
+          
+          # Verify inbox does NOT contain body field
+          if echo "$response" | jq -e '.[0] | has("body")' > /dev/null 2>&1; then
+            echo "✗ Inbox should not contain body field"
+            exit 1
+          else
+            echo "✓ Inbox correctly excludes body field"
+          fi
+
+      - name: Test API - Email detail by ID
+        run: |
+          echo "Testing email detail endpoint..."
+          inbox=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com")
+          email_id=$(echo "$inbox" | jq -r '.[0].id')
+          
+          echo "Fetching detail for email: $email_id"
+          detail=$(curl -s "http://localhost:48080/email?id=$email_id")
+          
+          # Verify detail structure has body and attachments
+          if echo "$detail" | jq -e 'has("id", "from", "to", "subject", "body", "created_at", "attachments")' > /dev/null; then
+            echo "✓ Email detail structure is valid"
+          else
+            echo "✗ Email detail structure is invalid"
+            echo "Response: $detail"
+            exit 1
+          fi
+          
+          # Verify body is present
+          body=$(echo "$detail" | jq -r '.body // empty')
+          if [ ! -z "$body" ]; then
+            echo "✓ Email body present (length: ${#body})"
+          else
+            echo "⚠ Email body is empty (may be expected for some emails)"
+          fi
+
+      - name: Test API - Email not found (404)
+        run: |
+          echo "Testing non-existent email ID..."
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:48080/email?id=00000000-0000-7000-8000-000000000000")
+          
+          if [ "$http_code" -eq 404 ]; then
+            echo "✓ Correctly returned 404 for non-existent email"
+          else
+            echo "✗ Expected 404, got $http_code"
+            exit 1
+          fi
+
+      - name: Test API - Missing email ID parameter
+        run: |
+          echo "Testing missing 'id' parameter..."
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:48080/email")
+          
+          if [ "$http_code" -eq 400 ]; then
+            echo "✓ Correctly returned 400 for missing ID"
+          else
+            echo "✗ Expected 400, got $http_code"
             exit 1
           fi
 
       - name: Test API - Another valid address
         run: |
           echo "Testing valid address: admin2@test.milahabibie.com (should have 1 email)..."
-          response=$(curl -s "http://localhost:48080/inbox?name=admin2@test.milahabibie.com")
+          response=$(curl -s "http://localhost:48080/inbox?email=admin2@test.milahabibie.com")
           count=$(echo "$response" | jq '. | length')
           
           if [ "$count" -eq 1 ]; then
@@ -209,7 +276,7 @@ jobs:
       - name: Test API - Address not found
         run: |
           echo "Testing non-existent address: notfound@example.com..."
-          response=$(curl -s "http://localhost:48080/inbox?name=notfound@example.com")
+          response=$(curl -s "http://localhost:48080/inbox?email=notfound@example.com")
           count=$(echo "$response" | jq '. | length')
           
           if [ "$count" -eq 0 ]; then
@@ -222,7 +289,7 @@ jobs:
 
       - name: Test API - Missing required parameter
         run: |
-          echo "Testing missing 'name' parameter..."
+          echo "Testing missing 'email' parameter..."
           http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:48080/inbox")
           
           if [ "$http_code" -eq 400 ]; then
@@ -232,24 +299,10 @@ jobs:
             exit 1
           fi
 
-      - name: Test API - Pagination with limit
-        run: |
-          echo "Testing pagination with limit=1..."
-          response=$(curl -s "http://localhost:48080/inbox?name=admin@test.milahabibie.com&limit=1")
-          count=$(echo "$response" | jq '. | length')
-          
-          if [ "$count" -eq 1 ]; then
-            echo "✓ Limit parameter works correctly"
-          else
-            echo "✗ Expected 1 email with limit=1, got $count"
-            echo "Response: $response"
-            exit 1
-          fi
-
       - name: Test API - Pagination with offset
         run: |
           echo "Testing pagination with offset=1..."
-          response=$(curl -s "http://localhost:48080/inbox?name=admin@test.milahabibie.com&limit=10&offset=1")
+          response=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com&offset=1")
           count=$(echo "$response" | jq '. | length')
           
           if [ "$count" -eq 1 ]; then
@@ -260,24 +313,10 @@ jobs:
             exit 1
           fi
 
-      - name: Test API - Invalid limit parameter
-        run: |
-          echo "Testing invalid limit parameter (non-numeric)..."
-          response=$(curl -s "http://localhost:48080/inbox?name=admin@test.milahabibie.com&limit=invalid")
-          count=$(echo "$response" | jq '. | length')
-          
-          # Should fall back to default limit (100), so should return all 2 emails
-          if [ "$count" -eq 2 ]; then
-            echo "✓ Invalid limit parameter falls back to default"
-          else
-            echo "✗ Expected 2 emails with invalid limit, got $count"
-            exit 1
-          fi
-
       - name: Test API - Negative offset
         run: |
           echo "Testing negative offset (should be ignored/default to 0)..."
-          response=$(curl -s "http://localhost:48080/inbox?name=admin@test.milahabibie.com&offset=-5")
+          response=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com&offset=-5")
           count=$(echo "$response" | jq '. | length')
           
           # Should fall back to offset 0 and return all emails
@@ -288,46 +327,49 @@ jobs:
             exit 1
           fi
 
-      - name: Test API - Limit exceeds maximum
+      - name: Test API - Attachment metadata via detail endpoint
         run: |
-          echo "Testing limit exceeds maximum (2000 > 1000)..."
-          response=$(curl -s "http://localhost:48080/inbox?name=admin@test.milahabibie.com&limit=2000")
-          count=$(echo "$response" | jq '. | length')
+          echo "Testing attachment metadata via /email detail..."
+          inbox=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com")
           
-          # Should cap at max 1000 or return available emails (2)
-          if [ "$count" -eq 2 ]; then
-            echo "✓ Excessive limit handled correctly"
-          else
-            echo "✗ Expected 2 emails with excessive limit, got $count"
-            exit 1
-          fi
-
-      - name: Test API - Attachment metadata
-        run: |
-          echo "Testing attachment metadata in response..."
-          response=$(curl -s "http://localhost:48080/inbox?name=admin@test.milahabibie.com")
-          
-          # Check if any email has attachments
-          has_attachments=$(echo "$response" | jq '[.[] | select(.attachments | length > 0)] | length')
-          
-          if [ "$has_attachments" -gt 0 ]; then
-            echo "✓ Found $has_attachments email(s) with attachments"
+          # Try each email to find one with attachments
+          found_attachments=false
+          for id in $(echo "$inbox" | jq -r '.[].id'); do
+            detail=$(curl -s "http://localhost:48080/email?id=$id")
+            att_count=$(echo "$detail" | jq '.attachments | length')
             
-            # Verify attachment structure
-            if echo "$response" | jq -e '[.[] | select(.attachments | length > 0)][0].attachments[0] | has("id", "filename", "content_type", "size")' > /dev/null; then
-              echo "✓ Attachment metadata structure is valid"
-            else
-              echo "✗ Attachment metadata structure is invalid"
-              exit 1
+            if [ "$att_count" -gt 0 ]; then
+              found_attachments=true
+              echo "✓ Found email with $att_count attachment(s): $id"
+              
+              # Verify attachment structure
+              if echo "$detail" | jq -e '.attachments[0] | has("id", "filename", "content_type", "size")' > /dev/null; then
+                echo "✓ Attachment metadata structure is valid"
+              else
+                echo "✗ Attachment metadata structure is invalid"
+                exit 1
+              fi
+              
+              # Verify attachment ID is UUIDv7
+              att_id=$(echo "$detail" | jq -r '.attachments[0].id')
+              if echo "$att_id" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'; then
+                echo "✓ Attachment ID is valid UUIDv7: $att_id"
+              else
+                echo "✗ Attachment ID is not valid UUIDv7: $att_id"
+                exit 1
+              fi
+              break
             fi
-          else
-            echo "⚠ No attachments found (this might be expected)"
+          done
+          
+          if [ "$found_attachments" = false ]; then
+            echo "⚠ No attachments found (this might be expected depending on email parsing)"
           fi
 
       - name: Test API - Empty email address
         run: |
           echo "Testing empty email address..."
-          http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:48080/inbox?name=")
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:48080/inbox?email=")
           
           if [ "$http_code" -eq 400 ]; then
             echo "✓ Correctly returned 400 for empty address"
@@ -338,23 +380,32 @@ jobs:
 
       - name: Test API - CORS headers
         run: |
-          echo "Testing CORS headers..."
-          headers=$(curl -s -i "http://localhost:48080/inbox?name=admin@test.milahabibie.com" | head -20)
+          echo "Testing CORS headers on /inbox..."
+          headers=$(curl -s -i "http://localhost:48080/inbox?email=admin@test.milahabibie.com" | head -20)
           
           if echo "$headers" | grep -qi "Access-Control-Allow-Origin"; then
-            echo "✓ CORS headers present"
-            echo "$headers" | grep -i "Access-Control"
+            echo "✓ CORS headers present on /inbox"
           else
-            echo "✗ CORS headers missing"
-            echo "Response headers:"
-            echo "$headers"
+            echo "✗ CORS headers missing on /inbox"
+            exit 1
+          fi
+          
+          echo "Testing CORS headers on /email..."
+          inbox=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com")
+          email_id=$(echo "$inbox" | jq -r '.[0].id')
+          headers=$(curl -s -i "http://localhost:48080/email?id=$email_id" | head -20)
+          
+          if echo "$headers" | grep -qi "Access-Control-Allow-Origin"; then
+            echo "✓ CORS headers present on /email"
+          else
+            echo "✗ CORS headers missing on /email"
             exit 1
           fi
 
       - name: Test API - Custom generated emails for testuser@example.com
         run: |
           echo "Testing custom generated emails: testuser@example.com (should have 4 emails)..."
-          response=$(curl -s "http://localhost:48080/inbox?name=testuser@example.com")
+          response=$(curl -s "http://localhost:48080/inbox?email=testuser@example.com")
           count=$(echo "$response" | jq '. | length')
           
           if [ "$count" -eq 4 ]; then
@@ -373,7 +424,7 @@ jobs:
       - name: Test API - Custom email for different recipient
         run: |
           echo "Testing custom email for anotheruser@example.com (should have 1 email)..."
-          response=$(curl -s "http://localhost:48080/inbox?name=anotheruser@example.com")
+          response=$(curl -s "http://localhost:48080/inbox?email=anotheruser@example.com")
           count=$(echo "$response" | jq '. | length')
           
           if [ "$count" -eq 1 ]; then
@@ -384,7 +435,6 @@ jobs:
             exit 1
           fi
           
-          # Verify it's the correct email
           subject=$(echo "$response" | jq -r '.[0].subject')
           if echo "$subject" | grep -q "Different Recipient"; then
             echo "✓ Correct email received: $subject"
@@ -396,15 +446,18 @@ jobs:
       - name: Test API - Special characters handling
         run: |
           echo "Testing special characters in subject..."
-          response=$(curl -s "http://localhost:48080/inbox?name=testuser@example.com")
+          response=$(curl -s "http://localhost:48080/inbox?email=testuser@example.com")
           
-          # Check if special characters are preserved
-          special_email=$(echo "$response" | jq -r '.[] | select(.subject | contains("Special Chars"))')
+          # Find the special chars email in inbox summary
+          special_id=$(echo "$response" | jq -r '.[] | select(.subject | contains("Special Chars")) | .id')
           
-          if [ ! -z "$special_email" ]; then
-            subject=$(echo "$special_email" | jq -r '.subject')
-            body=$(echo "$special_email" | jq -r '.body')
-            echo "✓ Special character email found"
+          if [ ! -z "$special_id" ]; then
+            echo "✓ Special character email found in inbox: $special_id"
+            
+            # Fetch detail to check body
+            detail=$(curl -s "http://localhost:48080/email?id=$special_id")
+            subject=$(echo "$detail" | jq -r '.subject')
+            body=$(echo "$detail" | jq -r '.body')
             echo "  Subject: $subject"
             echo "  Body preview: ${body:0:100}"
           else
@@ -415,13 +468,15 @@ jobs:
       - name: Test API - Long content handling
         run: |
           echo "Testing long content email..."
-          response=$(curl -s "http://localhost:48080/inbox?name=testuser@example.com")
+          response=$(curl -s "http://localhost:48080/inbox?email=testuser@example.com")
           
-          # Find the long content email
-          long_email=$(echo "$response" | jq '.[] | select(.subject | contains("Long Content"))')
+          # Find the long content email in inbox
+          long_id=$(echo "$response" | jq -r '.[] | select(.subject | contains("Long Content")) | .id')
           
-          if [ ! -z "$long_email" ]; then
-            body_length=$(echo "$long_email" | jq -r '.body' | wc -c)
+          if [ ! -z "$long_id" ]; then
+            # Fetch detail to check body length
+            detail=$(curl -s "http://localhost:48080/email?id=$long_id")
+            body_length=$(echo "$detail" | jq -r '.body' | wc -c)
             echo "✓ Long content email found (body length: $body_length bytes)"
             
             if [ "$body_length" -gt 1000 ]; then
@@ -438,11 +493,10 @@ jobs:
         run: |
           echo "Verifying total email count..."
           
-          # Count emails for all test addresses
-          count1=$(curl -s "http://localhost:48080/inbox?name=admin@test.milahabibie.com" | jq '. | length')
-          count2=$(curl -s "http://localhost:48080/inbox?name=admin2@test.milahabibie.com" | jq '. | length')
-          count3=$(curl -s "http://localhost:48080/inbox?name=testuser@example.com" | jq '. | length')
-          count4=$(curl -s "http://localhost:48080/inbox?name=anotheruser@example.com" | jq '. | length')
+          count1=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com" | jq '. | length')
+          count2=$(curl -s "http://localhost:48080/inbox?email=admin2@test.milahabibie.com" | jq '. | length')
+          count3=$(curl -s "http://localhost:48080/inbox?email=testuser@example.com" | jq '. | length')
+          count4=$(curl -s "http://localhost:48080/inbox?email=anotheruser@example.com" | jq '. | length')
           
           total=$((count1 + count2 + count3 + count4))
           expected=8  # 2 + 1 + 4 + 1

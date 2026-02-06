@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"log"
@@ -39,9 +40,21 @@ func NewPostgresStorage(dsn string) (*PostgresStorage, error) {
 
 // createTables creates the email and attachment tables if they don't exist
 func (ps *PostgresStorage) createTables() error {
+	// Migration: detect old schema (SERIAL integer id) and drop tables
+	var colType string
+	err := ps.db.QueryRow(`
+		SELECT data_type FROM information_schema.columns
+		WHERE table_name = 'email' AND column_name = 'id'
+	`).Scan(&colType)
+	if err == nil && colType == "integer" {
+		log.Printf("Migrating database schema from integer IDs to UUIDv7...")
+		ps.db.Exec(`DROP TABLE IF EXISTS attachment CASCADE`)
+		ps.db.Exec(`DROP TABLE IF EXISTS email CASCADE`)
+	}
+
 	emailTableSQL := `
 	CREATE TABLE IF NOT EXISTS email (
-		id SERIAL PRIMARY KEY,
+		id TEXT PRIMARY KEY,
 		"from" TEXT NOT NULL,
 		"to" TEXT NOT NULL,
 		subject TEXT,
@@ -55,25 +68,21 @@ func (ps *PostgresStorage) createTables() error {
 
 	attachmentTableSQL := `
 	CREATE TABLE IF NOT EXISTS attachment (
-		id SERIAL PRIMARY KEY,
-		email_id INTEGER NOT NULL REFERENCES email(id) ON DELETE CASCADE,
+		id TEXT PRIMARY KEY,
+		email_id TEXT NOT NULL REFERENCES email(id) ON DELETE CASCADE,
 		filename TEXT NOT NULL,
 		content_type TEXT,
 		data BYTEA,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`
 
-	// Create email table
 	if _, err := ps.db.Exec(emailTableSQL); err != nil {
 		return err
 	}
-
-	// Create attachment table
 	if _, err := ps.db.Exec(attachmentTableSQL); err != nil {
 		return err
 	}
 
-	// Create indexes
 	indexSQL := `
 	CREATE INDEX IF NOT EXISTS idx_email_from ON email("from");
 	CREATE INDEX IF NOT EXISTS idx_email_to ON email("to");
@@ -84,21 +93,33 @@ func (ps *PostgresStorage) createTables() error {
 		return err
 	}
 
-	// Add html_body column if it doesn't exist (for existing databases)
-	addColumnSQL := `ALTER TABLE email ADD COLUMN IF NOT EXISTS html_body TEXT;`
-	if _, err := ps.db.Exec(addColumnSQL); err != nil {
-		return err
-	}
-
 	return nil
 }
 
+// generateUUIDv7 generates a UUIDv7 with embedded millisecond timestamp
+func generateUUIDv7() string {
+	ms := time.Now().UnixMilli()
+	var b [16]byte
+	b[0] = byte(ms >> 40)
+	b[1] = byte(ms >> 32)
+	b[2] = byte(ms >> 24)
+	b[3] = byte(ms >> 16)
+	b[4] = byte(ms >> 8)
+	b[5] = byte(ms)
+	rand.Read(b[6:])
+	b[6] = (b[6] & 0x0f) | 0x70 // version 7
+	b[8] = (b[8] & 0x3f) | 0x80 // variant RFC 4122
+	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+		b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])
+}
+
 // Save saves an email and its attachments to postgres
+// Base64 content is decoded by the parser BEFORE inserting into the database
 func (ps *PostgresStorage) Save(email Email) (string, error) {
-	// Parse the email content
+	// Parse the email content (base64 decoding happens here)
 	parsed, err := parser.Parse(email.Content)
 	if err != nil {
-		// If parsing fails, still save with basic info
 		parsed = &parser.Email{
 			From:       email.From,
 			To:         email.To,
@@ -106,18 +127,17 @@ func (ps *PostgresStorage) Save(email Email) (string, error) {
 		}
 	}
 
-	// Start a transaction
 	tx, err := ps.db.Begin()
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
 
-	// Insert email record
-	var emailID int
-	err = tx.QueryRow(
-		`INSERT INTO email ("from", "to", subject, date, body, html_body, raw_content)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+	emailID := generateUUIDv7()
+	_, err = tx.Exec(
+		`INSERT INTO email (id, "from", "to", subject, date, body, html_body, raw_content)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		emailID,
 		parsed.From,
 		parsed.To,
 		parsed.Subject,
@@ -125,17 +145,17 @@ func (ps *PostgresStorage) Save(email Email) (string, error) {
 		parsed.Body,
 		parsed.HTMLBody,
 		parsed.RawContent,
-	).Scan(&emailID)
-
+	)
 	if err != nil {
 		return "", err
 	}
 
-	// Insert attachments
 	for _, att := range parsed.Attachments {
+		attID := generateUUIDv7()
 		_, err := tx.Exec(
-			`INSERT INTO attachment (email_id, filename, content_type, data)
-			 VALUES ($1, $2, $3, $4)`,
+			`INSERT INTO attachment (id, email_id, filename, content_type, data)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			attID,
 			emailID,
 			att.Filename,
 			att.ContentType,
@@ -146,21 +166,29 @@ func (ps *PostgresStorage) Save(email Email) (string, error) {
 		}
 	}
 
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
 
-	filename := fmt.Sprintf("postgres_id_%d_%d", emailID, time.Now().UnixNano())
-	log.Printf("Email saved to postgres: id=%d, from=%s, to=%s, attachments=%d",
+	log.Printf("Email saved to postgres: id=%s, from=%s, to=%s, attachments=%d",
 		emailID, parsed.From, parsed.To, len(parsed.Attachments))
 
-	return filename, nil
+	return emailID, nil
 }
 
-// EmailWithAttachments represents an email with its attachments for API responses
-type EmailWithAttachments struct {
-	ID          int              `json:"id"`
+// EmailSummary represents email metadata for inbox listing (no body/attachments)
+type EmailSummary struct {
+	ID        string    `json:"id"`
+	From      string    `json:"from"`
+	To        string    `json:"to"`
+	Subject   string    `json:"subject"`
+	Date      string    `json:"date"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// EmailDetail represents a full email with body and attachment metadata
+type EmailDetail struct {
+	ID          string           `json:"id"`
 	From        string           `json:"from"`
 	To          string           `json:"to"`
 	Subject     string           `json:"subject"`
@@ -172,66 +200,90 @@ type EmailWithAttachments struct {
 	Attachments []AttachmentInfo `json:"attachments"`
 }
 
-// AttachmentInfo represents attachment metadata (without binary data by default)
+// AttachmentInfo represents attachment metadata
 type AttachmentInfo struct {
-	ID          int    `json:"id"`
+	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Size        int    `json:"size"`
 }
 
-// GetEmailsByAddress fetches emails for a specific recipient address with pagination
-func (ps *PostgresStorage) GetEmailsByAddress(address string, limit, offset int) ([]EmailWithAttachments, error) {
-	// Query emails
+// GetInbox fetches email summaries for a recipient (10 per page, offset only)
+func (ps *PostgresStorage) GetInbox(address string, offset int) ([]EmailSummary, error) {
+	if offset < 0 {
+		offset = 0
+	}
 	rows, err := ps.db.Query(`
-		SELECT id, "from", "to", subject, date, body, html_body, raw_content, created_at
+		SELECT id, "from", "to", COALESCE(subject, ''), COALESCE(date, ''), created_at
 		FROM email
 		WHERE "to" = $1
 		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`, address, limit, offset)
+		LIMIT 10 OFFSET $2
+	`, address, offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	emails := make([]EmailWithAttachments, 0) // Initialize as empty slice, not nil
+	emails := make([]EmailSummary, 0)
 	for rows.Next() {
-		var email EmailWithAttachments
-		var rawContent sql.NullString
-		var htmlBody sql.NullString
-		err := rows.Scan(
-			&email.ID,
-			&email.From,
-			&email.To,
-			&email.Subject,
-			&email.Date,
-			&email.Body,
-			&htmlBody,
-			&rawContent,
-			&email.CreatedAt,
-		)
-		if err != nil {
+		var email EmailSummary
+		if err := rows.Scan(&email.ID, &email.From, &email.To, &email.Subject, &email.Date, &email.CreatedAt); err != nil {
 			return nil, err
 		}
-
-		if htmlBody.Valid {
-			email.HTMLBody = htmlBody.String
-		}
-
-		if rawContent.Valid {
-			email.RawContent = rawContent.String
-		}
-
-		email.Attachments = make([]AttachmentInfo, 0)
 		emails = append(emails, email)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
 	return emails, nil
+}
+
+// GetEmailByID fetches full email detail including body and attachments by UUIDv7
+func (ps *PostgresStorage) GetEmailByID(id string) (*EmailDetail, error) {
+	var email EmailDetail
+	var htmlBody, rawContent sql.NullString
+	err := ps.db.QueryRow(`
+		SELECT id, "from", "to", COALESCE(subject, ''), COALESCE(date, ''),
+		       COALESCE(body, ''), html_body, raw_content, created_at
+		FROM email WHERE id = $1
+	`, id).Scan(
+		&email.ID, &email.From, &email.To, &email.Subject, &email.Date,
+		&email.Body, &htmlBody, &rawContent, &email.CreatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if htmlBody.Valid {
+		email.HTMLBody = htmlBody.String
+	}
+	if rawContent.Valid {
+		email.RawContent = rawContent.String
+	}
+
+	attRows, err := ps.db.Query(`
+		SELECT id, filename, COALESCE(content_type, ''), COALESCE(length(data), 0)
+		FROM attachment WHERE email_id = $1
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer attRows.Close()
+
+	email.Attachments = make([]AttachmentInfo, 0)
+	for attRows.Next() {
+		var att AttachmentInfo
+		if err := attRows.Scan(&att.ID, &att.Filename, &att.ContentType, &att.Size); err != nil {
+			return nil, err
+		}
+		email.Attachments = append(email.Attachments, att)
+	}
+
+	return &email, nil
 }
 
 // Close closes the database connection
