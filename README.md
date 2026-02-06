@@ -6,7 +6,10 @@ A simple SMTP server in Go using the `go-smtp` library.
 - Accepts SMTP connections on port 25
 - Logs sender, recipient, and email body to console
 - Prints required DNS records for mail delivery
-- Does NOT store or forward emails (for testing/learning only)
+- Stores emails to disk (file storage)
+- Stores emails to PostgreSQL database with attachment tracking
+- Dual-write capability (file + database simultaneously)
+- Does NOT forward emails (for testing/learning only)
 
 ## Quick Start
 
@@ -34,6 +37,7 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 |---------------|----------|------------------------------------------------------------------|
 | MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint at `/`.       |
 | HTTP_PORT     | No       | (Optional) HTTP health port. Defaults to `48080` if not set.      |
+| DB_URL        | No       | (Optional) PostgreSQL connection string. If provided, emails are saved to both file and database. Format: `user=username password=pass dbname=emaildb host=localhost port=5432 sslmode=disable`       |
 
 ## Project Structure
 - `cmd/email-server/main.go` — Entry point
@@ -91,3 +95,81 @@ Below are real-world screenshots and explanations of the server in action:
 - The filename is a timestamp in nanoseconds, ensuring uniqueness.
 - The server logs a summary: `from: <sender>, saved in <filename>`
 - No email content is printed to the console for privacy and clarity.
+
+## Docker Deployment
+
+### Build and Run with Docker Compose
+
+The easiest way to deploy is using Docker Compose, which includes PostgreSQL:
+
+```bash
+# Clone or download the repository
+cd email-server
+
+# Build and start the services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f email-server
+
+# Stop the services
+docker-compose down
+```
+
+### Environment Setup with MAIL_SERVERS
+
+Create a `.env` file or set environment variables:
+
+```bash
+# For SMTP with DNS validation
+export MAIL_SERVERS="mail.example.com,1.2.3.4"
+docker-compose up -d
+
+# For SMTP without MAIL_SERVERS (accepts all)
+docker-compose up -d
+```
+
+### Manual Docker Build
+
+```bash
+docker build -t email-server .
+docker run -p 25:25 -p 48080:48080 \
+  -e DB_URL="user=emailuser password=emailpass dbname=emaildb host=postgres port=5432 sslmode=disable" \
+  -e MAIL_SERVERS="mail.example.com,1.2.3.4" \
+  email-server
+```
+
+## Database Schema
+
+When `DB_URL` is provided, the server automatically creates two tables:
+
+### email table
+Stores email metadata and content:
+- `id` (SERIAL PRIMARY KEY) — Unique email ID
+- `from` (TEXT) — Sender email address
+- `to` (TEXT) — Recipient email address  
+- `subject` (TEXT) — Email subject
+- `date` (TEXT) — Email send date
+- `body` (TEXT) — Parsed email body
+- `raw_content` (TEXT) — Full raw email content
+- `created_at` (TIMESTAMP) — Record creation time
+
+### attachment table
+Stores email attachments:
+- `id` (SERIAL PRIMARY KEY) — Unique attachment ID
+- `email_id` (INTEGER FK) — Foreign key to email table
+- `filename` (TEXT) — Original filename
+- `content_type` (TEXT) — MIME type (e.g., image/png)
+- `data` (BYTEA) — Binary attachment data
+- `created_at` (TIMESTAMP) — Record creation time
+
+## Storage Options
+
+### File Storage (Default)
+Emails are saved to `emails/<to>/<from>/timestamp.txt`. This is always enabled.
+
+### PostgreSQL Storage (Optional)
+When `DB_URL` is set, emails are saved to PostgreSQL in addition to files.
+
+### Composite Storage
+If `DB_URL` is provided, both file and database storage are used simultaneously. If PostgreSQL connection fails, the server falls back to file-only storage with a warning.

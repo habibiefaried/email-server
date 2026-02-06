@@ -44,8 +44,28 @@ func main() {
 		log.Printf("MAIL_SERVERS not set — Email server is running without FQDN")
 	}
 
+	// Initialize storage backends
+	fileStore := storage.NewFileStorage("emails")
+
+	// Try to initialize postgres storage if DB_URL is provided
+	var store storage.Storage
+	dbURL := os.Getenv("DB_URL")
+	if dbURL != "" {
+		pgStore, err := storage.NewPostgresStorage(dbURL)
+		if err != nil {
+			log.Printf("Warning: Failed to connect to postgres: %v", err)
+			log.Printf("Falling back to file-only storage")
+			store = fileStore
+		} else {
+			log.Printf("Postgres storage initialized, using composite storage")
+			store = storage.NewCompositeStorage(fileStore, pgStore)
+		}
+	} else {
+		log.Printf("DB_URL not set, using file-only storage")
+		store = fileStore
+	}
+
 	// Always run the email server
-	store := storage.NewFileStorage("emails")
 	go server.RunSMTPServer(fqdn, store)
 
 	// Single HTTP API for status checks

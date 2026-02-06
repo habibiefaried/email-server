@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: email-server-postgres
+    environment:
+      POSTGRES_USER: emailuser
+      POSTGRES_PASSWORD: emailpass
+      POSTGRES_DB: emaildb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emailuser -d emaildb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - email-network
+
+  email-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: email-server-smtp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MAIL_SERVERS: ${MAIL_SERVERS:-}
+      HTTP_PORT: 48080
+      DB_URL: "user=emailuser password=emailpass dbname=emaildb host=postgres port=5432 sslmode=disable"
+    ports:
+      - "25:25"
+      - "48080:48080"
+    volumes:
+      - ./emails:/root/emails
+    networks:
+      - email-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  email-network:
+    driver: bridge
