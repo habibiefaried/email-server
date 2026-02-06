@@ -47,6 +47,7 @@ func (ps *PostgresStorage) createTables() error {
 		subject TEXT,
 		date TEXT,
 		body TEXT,
+		html_body TEXT,
 		raw_content TEXT,
 		headers TEXT,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -83,6 +84,12 @@ func (ps *PostgresStorage) createTables() error {
 		return err
 	}
 
+	// Add html_body column if it doesn't exist (for existing databases)
+	addColumnSQL := `ALTER TABLE email ADD COLUMN IF NOT EXISTS html_body TEXT;`
+	if _, err := ps.db.Exec(addColumnSQL); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -109,13 +116,14 @@ func (ps *PostgresStorage) Save(email Email) (string, error) {
 	// Insert email record
 	var emailID int
 	err = tx.QueryRow(
-		`INSERT INTO email ("from", "to", subject, date, body, raw_content)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		`INSERT INTO email ("from", "to", subject, date, body, html_body, raw_content)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
 		parsed.From,
 		parsed.To,
 		parsed.Subject,
 		parsed.Date,
 		parsed.Body,
+		parsed.HTMLBody,
 		parsed.RawContent,
 	).Scan(&emailID)
 
@@ -158,6 +166,7 @@ type EmailWithAttachments struct {
 	Subject     string           `json:"subject"`
 	Date        string           `json:"date"`
 	Body        string           `json:"body"`
+	HTMLBody    string           `json:"html_body,omitempty"`
 	RawContent  string           `json:"raw_content,omitempty"`
 	CreatedAt   time.Time        `json:"created_at"`
 	Attachments []AttachmentInfo `json:"attachments"`
@@ -175,7 +184,7 @@ type AttachmentInfo struct {
 func (ps *PostgresStorage) GetEmailsByAddress(address string, limit, offset int) ([]EmailWithAttachments, error) {
 	// Query emails
 	rows, err := ps.db.Query(`
-		SELECT id, "from", "to", subject, date, body, raw_content, created_at
+		SELECT id, "from", "to", subject, date, body, html_body, raw_content, created_at
 		FROM email
 		WHERE "to" = $1
 		ORDER BY created_at DESC
@@ -186,10 +195,11 @@ func (ps *PostgresStorage) GetEmailsByAddress(address string, limit, offset int)
 	}
 	defer rows.Close()
 
-	var emails []EmailWithAttachments
+	emails := make([]EmailWithAttachments, 0) // Initialize as empty slice, not nil
 	for rows.Next() {
 		var email EmailWithAttachments
 		var rawContent sql.NullString
+		var htmlBody sql.NullString
 		err := rows.Scan(
 			&email.ID,
 			&email.From,
@@ -197,11 +207,16 @@ func (ps *PostgresStorage) GetEmailsByAddress(address string, limit, offset int)
 			&email.Subject,
 			&email.Date,
 			&email.Body,
+			&htmlBody,
 			&rawContent,
 			&email.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
+		}
+
+		if htmlBody.Valid {
+			email.HTMLBody = htmlBody.String
 		}
 
 		if rawContent.Valid {
@@ -218,7 +233,7 @@ func (ps *PostgresStorage) GetEmailsByAddress(address string, limit, offset int)
 			return nil, err
 		}
 
-		var attachments []AttachmentInfo
+		attachments := make([]AttachmentInfo, 0) // Initialize as empty slice, not nil
 		for attRows.Next() {
 			var att AttachmentInfo
 			if err := attRows.Scan(&att.ID, &att.Filename, &att.ContentType, &att.Size); err != nil {

@@ -15,7 +15,8 @@ type Email struct {
 	To          string
 	Subject     string
 	Date        string
-	Body        string
+	Body        string // Plain text body
+	HTMLBody    string // HTML body
 	Attachments []Attachment
 	RawContent  string
 }
@@ -108,14 +109,22 @@ func Parse(rawContent string) (*Email, error) {
 					Data:        data,
 				})
 			} else if strings.HasPrefix(partMediaType, "text/") {
-				if parsed.Body == "" || strings.HasPrefix(partMediaType, "text/plain") {
+				// Extract both plain text and HTML versions
+				if strings.HasPrefix(partMediaType, "text/html") {
+					parsed.HTMLBody = string(body)
+				} else if strings.HasPrefix(partMediaType, "text/plain") {
 					parsed.Body = string(body)
 				}
 			}
 		}
 	} else {
 		body, _ := io.ReadAll(msg.Body)
-		parsed.Body = string(body)
+		// For non-multipart emails, assign based on content type
+		if strings.HasPrefix(mediaType, "text/html") {
+			parsed.HTMLBody = string(body)
+		} else {
+			parsed.Body = string(body)
+		}
 	}
 
 	return parsed, nil
