@@ -44,7 +44,9 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 | MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint at `/`.       |
 | SMTP_PORT     | No       | (Optional) SMTP server port. Defaults to `2525` if not set. Use port `25` for production or when running as root.       |
 | HTTP_PORT     | No       | (Optional) HTTP health port. Defaults to `48080` if not set.      |
-| DB_URL        | No       | (Optional) PostgreSQL connection string. If provided, emails are saved to both file and database. Format: `user=username password=pass dbname=emaildb host=localhost port=5432 sslmode=disable`       |
+| DB_URL        | No       | (Optional) PostgreSQL connection string (works with Neon, AWS RDS, or any PostgreSQL). If provided, emails are saved to both file and database. Format: `user=username password=pass dbname=emaildb host=hostname port=5432 sslmode=require`       |
+
+**Note:** For Neon PostgreSQL, always use `sslmode=require`. For local PostgreSQL, you can use `sslmode=disable`.
 
 ## Project Structure
 - `cmd/email-server/main.go` — Entry point
@@ -159,21 +161,48 @@ Below are real-world screenshots and explanations of the server in action:
 
 ## Docker Deployment
 
-### Build and Run with Docker Compose
+### Prerequisites
 
-The easiest way to deploy is using Docker Compose, which includes PostgreSQL:
+Create a `.env` file for your environment variables (keeps sensitive data out of git):
+
+```bash
+# Copy the example file
+cp .env.example .env
+
+# Edit with your configuration
+nano .env  # or use your preferred editor
+```
+
+Example `.env` file for Neon PostgreSQL:
+```bash
+# SMTP Configuration
+MAIL_SERVERS=mail.example.com,1.2.3.4
+SMTP_PORT=2525
+HTTP_PORT=48080
+
+# Neon PostgreSQL Connection
+DB_URL=user=myuser password=mypassword dbname=mydb host=ep-something.us-east-1.aws.neon.tech port=5432 sslmode=require
+```
+
+**Important:** Add `.env` to your `.gitignore` to avoid committing credentials.
+
+### Build and Run with Docker Compose
 
 ```bash
 # Clone or download the repository
 cd email-server
 
-# Build and start the services
+# Create your .env file (see above)
+cp .env.example .env
+# Edit .env with your Neon credentials
+
+# Build and start the service
 docker-compose up -d
 
 # View logs
 docker-compose logs -f email-server
 
-# Stop the services
+# Stop the service
 docker-compose down
 ```
 
@@ -186,27 +215,22 @@ docker-compose build --no-cache
 docker-compose up -d
 ```
 
-### Environment Setup with MAIL_SERVERS
-
-Create a `.env` file or set environment variables:
-
-```bash
-# For SMTP with DNS validation
-export MAIL_SERVERS="mail.example.com,1.2.3.4"
-docker-compose up -d
-
-# For SMTP without MAIL_SERVERS (accepts all)
-docker-compose up -d
-```
-
 ### Manual Docker Build
 
 ```bash
+# Build the image
 docker build -t email-server .
+
+# Run with environment variables (option 1: inline)
 docker run -p 25:2525 -p 48080:48080 \
   -e SMTP_PORT=2525 \
-  -e DB_URL="user=emailuser password=emailpass dbname=emaildb host=postgres port=5432 sslmode=disable" \
+  -e DB_URL="user=myuser password=mypass dbname=mydb host=ep-something.us-east-1.aws.neon.tech port=5432 sslmode=require" \
   -e MAIL_SERVERS="mail.example.com,1.2.3.4" \
+  email-server
+
+# Run with .env file (option 2: recommended for security)
+docker run -p 25:2525 -p 48080:48080 \
+  --env-file .env \
   email-server
 ```
 
