@@ -1,12 +1,11 @@
 package storage
 
 import (
-	"crypto/rand"
 	"database/sql"
-	"fmt"
 	"log"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/habibiefaried/email-server/internal/parser"
 	_ "github.com/lib/pq"
 )
@@ -46,15 +45,15 @@ func (ps *PostgresStorage) createTables() error {
 		SELECT data_type FROM information_schema.columns
 		WHERE table_name = 'email' AND column_name = 'id'
 	`).Scan(&colType)
-	if err == nil && colType == "integer" {
-		log.Printf("Migrating database schema from integer IDs to UUIDv7...")
+	if err == nil && (colType == "integer" || colType == "text") {
+		log.Printf("Migrating database schema to native UUID columns...")
 		ps.db.Exec(`DROP TABLE IF EXISTS attachment CASCADE`)
 		ps.db.Exec(`DROP TABLE IF EXISTS email CASCADE`)
 	}
 
 	emailTableSQL := `
 	CREATE TABLE IF NOT EXISTS email (
-		id TEXT PRIMARY KEY,
+		id UUID PRIMARY KEY,
 		"from" TEXT NOT NULL,
 		"to" TEXT NOT NULL,
 		subject TEXT,
@@ -68,8 +67,8 @@ func (ps *PostgresStorage) createTables() error {
 
 	attachmentTableSQL := `
 	CREATE TABLE IF NOT EXISTS attachment (
-		id TEXT PRIMARY KEY,
-		email_id TEXT NOT NULL REFERENCES email(id) ON DELETE CASCADE,
+		id UUID PRIMARY KEY,
+		email_id UUID NOT NULL REFERENCES email(id) ON DELETE CASCADE,
 		filename TEXT NOT NULL,
 		content_type TEXT,
 		data BYTEA,
@@ -96,22 +95,14 @@ func (ps *PostgresStorage) createTables() error {
 	return nil
 }
 
-// generateUUIDv7 generates a UUIDv7 with embedded millisecond timestamp
+// generateUUIDv7 generates a UUIDv7 using github.com/google/uuid
 func generateUUIDv7() string {
-	ms := time.Now().UnixMilli()
-	var b [16]byte
-	b[0] = byte(ms >> 40)
-	b[1] = byte(ms >> 32)
-	b[2] = byte(ms >> 24)
-	b[3] = byte(ms >> 16)
-	b[4] = byte(ms >> 8)
-	b[5] = byte(ms)
-	rand.Read(b[6:])
-	b[6] = (b[6] & 0x0f) | 0x70 // version 7
-	b[8] = (b[8] & 0x3f) | 0x80 // variant RFC 4122
-	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-		b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])
+	id, err := uuid.NewV7()
+	if err != nil {
+		// Fallback to V4 if V7 fails (should never happen)
+		return uuid.New().String()
+	}
+	return id.String()
 }
 
 // Save saves an email and its attachments to postgres

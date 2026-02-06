@@ -262,7 +262,7 @@ When `DB_URL` is provided, the server automatically creates two tables:
 
 ### email table
 Stores email metadata and content:
-- `id` (TEXT PRIMARY KEY) — UUIDv7 (timestamp-sortable, non-guessable)
+- `id` (UUID PRIMARY KEY) — UUIDv7 via `github.com/google/uuid` (timestamp-sortable, non-guessable)
 - `from` (TEXT) — Sender email address
 - `to` (TEXT) — Recipient email address  
 - `subject` (TEXT) — Email subject
@@ -274,8 +274,8 @@ Stores email metadata and content:
 
 ### attachment table
 Stores email attachments:
-- `id` (TEXT PRIMARY KEY) — UUIDv7
-- `email_id` (TEXT FK) — Foreign key to email table
+- `id` (UUID PRIMARY KEY) — UUIDv7
+- `email_id` (UUID FK) — Foreign key to email table
 - `filename` (TEXT) — Original filename
 - `content_type` (TEXT) — MIME type (e.g., image/png)
 - `data` (BYTEA) — Binary attachment data (base64 decoded)
