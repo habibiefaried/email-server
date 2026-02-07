@@ -122,6 +122,29 @@ func (ps *PostgresStorage) Save(email Email) (string, error) {
 		}
 	}
 
+	// Ensure body and html_body are not empty by generating HTML from raw content if needed
+	if parsed.Body == "" && parsed.HTMLBody == "" && parsed.RawContent != "" {
+		if reparsed, err := parser.Parse(parsed.RawContent); err == nil {
+			if reparsed.HTMLBody != "" {
+				parsed.HTMLBody = reparsed.HTMLBody
+				parsed.Body = reparsed.HTMLBody
+			} else if reparsed.Body != "" {
+				parsed.Body = plainTextToHTML(reparsed.Body)
+				parsed.HTMLBody = parsed.Body
+			}
+		}
+	}
+
+	// If only Body is set, generate HTML version
+	if parsed.Body != "" && parsed.HTMLBody == "" {
+		parsed.HTMLBody = plainTextToHTML(parsed.Body)
+	}
+
+	// If only HTMLBody is set, use it as Body too
+	if parsed.HTMLBody != "" && parsed.Body == "" {
+		parsed.Body = parsed.HTMLBody
+	}
+
 	tx, err := ps.db.Begin()
 	if err != nil {
 		return "", err
