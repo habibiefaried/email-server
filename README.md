@@ -8,11 +8,10 @@ A simple SMTP server in Go using the `go-smtp` library.
 - Accepts SMTP connections on port 25
 - Logs sender, recipient, and email body to console
 - Prints required DNS records for mail delivery
-- Stores emails to PostgreSQL database with attachment tracking
+- Stores emails to PostgreSQL database (raw content + HTML body)
 - UUIDv7 primary keys (timestamp-sortable, no guessable IDs)
 - Base64 email content decoded before database insertion
-- **Attachment size limit: 2MB** — larger attachments are redacted to avoid database bloat
-- **Email size limit: 512KB** — emails larger than this will show a limit message instead of parsed content
+- HTML body is generated from raw MIME content using enmime (inline images embedded as data URIs)
 - Fallback to file storage when database is unavailable
 - HTTP API: `/inbox` (summary list) and `/email` (full detail)
 - Fully tested with automated CI/CD pipeline
@@ -47,6 +46,7 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 | MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint at `/`.       |
 | SMTP_PORT     | No       | (Optional) SMTP server port. Defaults to `2525` if not set. Use port `25` for production or when running as root.       |
 | HTTP_PORT     | No       | (Optional) HTTP health port. Defaults to `48080` if not set.      |
+| EMAIL_SIZE_LIMIT | No    | (Optional) Maximum email size in bytes before rejection. Defaults to `524288` (512KB). Emails exceeding this limit will be stored with error message: "Sorry, the email exceeds our limit (512kb)". This is a soft limit checked before expensive MIME parsing to prevent memory exhaustion. Set to `0` to disable limit.       |
 | DB_URL        | No       | (Optional) PostgreSQL connection string (works with Neon, AWS RDS, or any PostgreSQL). If provided, emails are saved to database only. Falls back to file storage if connection fails. Format: `user=username password=pass dbname=emaildb host=hostname port=5432 sslmode=require`       |
 
 **Note:** For Neon PostgreSQL, always use `sslmode=require`. For local PostgreSQL, you can use `sslmode=disable`.
@@ -122,10 +122,10 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
 
 ### Email Detail API
 - **Endpoint:** `GET /email?id=<uuidv7>`
-- **Description:** Fetch full email detail including body (HTML-rendered), HTML body, and attachments (with base64 data) by UUIDv7 ID. If no parsed body/HTML is available, the raw email content is re-parsed and converted to HTML automatically.
+- **Description:** Fetch full email detail including HTML-rendered body by UUIDv7 ID. The server parses raw MIME content using enmime and embeds inline images as data URIs.
 - **Query Parameters:**
   - `id` (required) — UUIDv7 of the email
-- **Response:** JSON object with full email content and attachment data
+- **Response:** JSON object with full email content
 - **CORS:** Enabled for cross-origin requests
 - **Examples:**
   ```bash
@@ -140,22 +140,12 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
     "to": "test@example.com",
     "subject": "Test Email",
     "date": "Wed, 5 Feb 2026 10:30:00 +0000",
-    "body": "<!DOCTYPE html><html>...rendered HTML...</html>",
-    "html_body": "<html>...</html>",
-    "created_at": "2026-02-06T08:30:00Z",
-    "attachments": [
-      {
-        "id": "0194d3f0-7e1b-7c34-8b2e-1a2b3c4d5e6f",
-        "filename": "document.pdf",
-        "content_type": "application/pdf",
-        "size": 52480,
-        "data": "JVBERi0xLjQK...base64-encoded..."
-      }
-    ]
+    "body": "<!DOCTYPE html><html>...rendered HTML with inline images...</html>",
+    "created_at": "2026-02-06T08:30:00Z"
   }
   ```
 
-**Note:** The `/inbox` endpoint returns **5 emails per page** (no body or attachments) for fast listing. Use `/email?id=<uuid>` to fetch the full content of a specific email including base64-encoded attachment data. **Attachments larger than 2MB are automatically redacted** with a placeholder message to prevent database bloat. **Emails with raw content larger than 512KB** will display "Limit of this service is 512kb only" as the body instead of parsed content. If body/HTML are empty, the server re-parses `raw_content` and generates HTML automatically. Plain text bodies are wrapped in a basic HTML template. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
+**Note:** The `/inbox` endpoint returns **5 emails per page** (no body) for fast listing. Use `/email?id=<uuid>` to fetch the full HTML body of a specific email. The server uses enmime to parse raw MIME content and embeds inline images as data URIs. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
 
 
 Below are real-world screenshots and explanations of the server in action:
