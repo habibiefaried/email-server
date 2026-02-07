@@ -14,6 +14,12 @@ import (
 	_ "github.com/lib/pq"
 )
 
+const (
+	// MaxAttachmentSize is the maximum size (in bytes) for storing attachment data.
+	// Attachments larger than this will be replaced with a redacted placeholder.
+	MaxAttachmentSize = 2 * 1024 * 1024 // 2 MB
+)
+
 // PostgresStorage implements Storage interface with Postgres backend
 type PostgresStorage struct {
 	db *sql.DB
@@ -170,6 +176,16 @@ func (ps *PostgresStorage) Save(email Email) (string, error) {
 
 	for _, att := range parsed.Attachments {
 		attID := generateUUIDv7()
+		attData := att.Data
+
+		// Redact large attachments (>2MB) to avoid database bloat
+		if len(attData) > MaxAttachmentSize {
+			redactedMsg := fmt.Sprintf("<attachment redacted: %s, original size: %d bytes, exceeds %d MB limit>",
+				att.Filename, len(attData), MaxAttachmentSize/(1024*1024))
+			attData = []byte(redactedMsg)
+			log.Printf("Attachment redacted: %s (%d bytes > %d bytes limit)", att.Filename, len(att.Data), MaxAttachmentSize)
+		}
+
 		_, err := tx.Exec(
 			`INSERT INTO attachment (id, email_id, filename, content_type, data)
 			 VALUES ($1, $2, $3, $4, $5)`,
@@ -177,7 +193,7 @@ func (ps *PostgresStorage) Save(email Email) (string, error) {
 			emailID,
 			att.Filename,
 			att.ContentType,
-			att.Data,
+			attData,
 		)
 		if err != nil {
 			return "", err

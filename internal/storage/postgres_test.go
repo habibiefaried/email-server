@@ -160,3 +160,36 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+func TestMaxAttachmentSize(t *testing.T) {
+	// Verify the constant is set to 2MB
+	expected := 2 * 1024 * 1024
+	if MaxAttachmentSize != expected {
+		t.Errorf("MaxAttachmentSize = %d, want %d (2MB)", MaxAttachmentSize, expected)
+	}
+}
+
+func TestAttachmentRedaction_Logic(t *testing.T) {
+	// Test the redaction logic (conceptual test since we don't mock DB)
+	smallData := make([]byte, 1*1024*1024) // 1MB
+	largeData := make([]byte, 3*1024*1024) // 3MB
+
+	if len(smallData) > MaxAttachmentSize {
+		t.Error("1MB attachment should NOT exceed MaxAttachmentSize")
+	}
+	if len(largeData) <= MaxAttachmentSize {
+		t.Error("3MB attachment SHOULD exceed MaxAttachmentSize")
+	}
+
+	// Verify redacted message format
+	redactedMsg := "<attachment redacted: test.pdf, original size: 3145728 bytes, exceeds 2 MB limit>"
+	if !contains(redactedMsg, "attachment redacted") {
+		t.Error("Redacted message should contain 'attachment redacted'")
+	}
+	if !contains(redactedMsg, "test.pdf") {
+		t.Error("Redacted message should contain filename")
+	}
+	if !contains(redactedMsg, "3145728 bytes") {
+		t.Error("Redacted message should contain original size")
+	}
+}

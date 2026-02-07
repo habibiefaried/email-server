@@ -11,6 +11,7 @@ A simple SMTP server in Go using the `go-smtp` library.
 - Stores emails to PostgreSQL database with attachment tracking
 - UUIDv7 primary keys (timestamp-sortable, no guessable IDs)
 - Base64 email content decoded before database insertion
+- **Attachment size limit: 2MB** — larger attachments are redacted to avoid database bloat
 - Fallback to file storage when database is unavailable
 - HTTP API: `/inbox` (summary list) and `/email` (full detail)
 - Fully tested with automated CI/CD pipeline
@@ -153,7 +154,7 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
   }
   ```
 
-**Note:** The `/inbox` endpoint returns **5 emails per page** (no body or attachments) for fast listing. Use `/email?id=<uuid>` to fetch the full content of a specific email including base64-encoded attachment data. If body/HTML are empty, the server re-parses `raw_content` and generates HTML automatically. Plain text bodies are wrapped in a basic HTML template. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
+**Note:** The `/inbox` endpoint returns **5 emails per page** (no body or attachments) for fast listing. Use `/email?id=<uuid>` to fetch the full content of a specific email including base64-encoded attachment data. **Attachments larger than 2MB are automatically redacted** with a placeholder message to prevent database bloat. If body/HTML are empty, the server re-parses `raw_content` and generates HTML automatically. Plain text bodies are wrapped in a basic HTML template. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
 
 
 Below are real-world screenshots and explanations of the server in action:
@@ -280,6 +281,7 @@ Stores email attachments:
 - `filename` (TEXT) — Original filename
 - `content_type` (TEXT) — MIME type (e.g., image/png)
 - `data` (BYTEA) — Binary attachment data (base64 decoded)
+  - **Size limit:** Attachments larger than **2MB** are automatically replaced with a redacted placeholder message to prevent database bloat
 - `created_at` (TIMESTAMP) — Record creation time
 
 ## Storage Options

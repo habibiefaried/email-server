@@ -13,6 +13,12 @@ import (
 	_ "github.com/lib/pq"
 )
 
+const (
+	// MaxAttachmentSize is the maximum size (in bytes) for storing attachment data.
+	// Attachments larger than this will be replaced with a redacted placeholder.
+	MaxAttachmentSize = 2 * 1024 * 1024 // 2 MB
+)
+
 type emailRow struct {
 	ID         string
 	RawContent string
@@ -122,10 +128,20 @@ func main() {
 			if attCount == 0 {
 				for _, att := range parsed.Attachments {
 					attID := generateUUIDv7()
+					attData := att.Data
+
+					// Redact large attachments (>2MB) to avoid database bloat
+					if len(attData) > MaxAttachmentSize {
+						redactedMsg := fmt.Sprintf("<attachment redacted: %s, original size: %d bytes, exceeds %d MB limit>",
+							att.Filename, len(attData), MaxAttachmentSize/(1024*1024))
+						attData = []byte(redactedMsg)
+						log.Printf("  Attachment redacted: %s (%d bytes > %d bytes limit)", att.Filename, len(att.Data), MaxAttachmentSize)
+					}
+
 					_, err := db.Exec(`
 						INSERT INTO attachment (id, email_id, filename, content_type, data)
 						VALUES ($1, $2, $3, $4, $5)
-					`, attID, e.ID, att.Filename, att.ContentType, att.Data)
+					`, attID, e.ID, att.Filename, att.ContentType, attData)
 					if err != nil {
 						log.Printf("  WARN: Failed to insert attachment %s: %v", att.Filename, err)
 					} else {
