@@ -91,7 +91,6 @@ func TestEmailDetail_HasBodyAndAttachments(t *testing.T) {
 		Date:        "2026-01-01",
 		Body:        "Hello",
 		HTMLBody:    "<p>Hello</p>",
-		RawContent:  "raw data",
 		CreatedAt:   time.Now(),
 		Attachments: []AttachmentInfo{{ID: generateUUIDv7(), Filename: "file.txt", ContentType: "text/plain", Size: 100, Data: "SGVsbG8gV29ybGQ="}},
 	}

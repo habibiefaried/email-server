@@ -121,7 +121,7 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
 
 ### Email Detail API
 - **Endpoint:** `GET /email?id=<uuidv7>`
-- **Description:** Fetch full email detail including body (HTML-rendered), HTML body, raw content, and attachments (with base64 data) by UUIDv7 ID. If no parsed body/HTML is available, the raw email content is re-parsed and converted to HTML automatically.
+- **Description:** Fetch full email detail including body (HTML-rendered), HTML body, and attachments (with base64 data) by UUIDv7 ID. If no parsed body/HTML is available, the raw email content is re-parsed and converted to HTML automatically.
 - **Query Parameters:**
   - `id` (required) — UUIDv7 of the email
 - **Response:** JSON object with full email content and attachment data

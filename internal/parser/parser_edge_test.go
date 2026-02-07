@@ -157,9 +157,11 @@ func TestParse_QuotedPrintableBody(t *testing.T) {
 		t.Fatalf("Parse failed: %v", err)
 	}
 
-	// Should not decode as base64 (just pass through raw)
 	if parsed.Body == "" {
 		t.Error("Body should not be empty for quoted-printable content")
+	}
+	if !strings.Contains(parsed.Body, "élève") {
+		t.Errorf("Body should contain decoded quoted-printable text, got: %q", parsed.Body)
 	}
 }
 
