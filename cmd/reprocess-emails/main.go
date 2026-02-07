@@ -17,6 +17,9 @@ const (
 	// MaxAttachmentSize is the maximum size (in bytes) for storing attachment data.
 	// Attachments larger than this will be replaced with a redacted placeholder.
 	MaxAttachmentSize = 2 * 1024 * 1024 // 2 MB
+	// MaxEmailSize is the maximum size (in bytes) for displaying email raw content.
+	// Emails larger than this will show a limit message instead of parsed content.
+	MaxEmailSize = 512 * 1024 // 512 KB
 )
 
 type emailRow struct {
@@ -82,25 +85,33 @@ func main() {
 	for i, e := range emails {
 		log.Printf("[%d/%d] Processing email %s...", i+1, total, e.ID)
 
-		parsed, err := parser.Parse(e.RawContent)
-		if err != nil {
-			log.Printf("  SKIP: Failed to parse raw_content: %v", err)
-			skipped++
-			continue
-		}
-
 		var body, htmlBody string
 
-		if parsed.HTMLBody != "" {
-			htmlBody = parsed.HTMLBody
-			body = parsed.HTMLBody
-		} else if parsed.Body != "" {
-			htmlBody = plainTextToHTML(parsed.Body)
-			body = htmlBody
+		// Check if email exceeds 512KB limit
+		if len(e.RawContent) > MaxEmailSize {
+			limitMsg := "Limit of this service is 512kb only"
+			log.Printf("  Email exceeds 512KB limit (%d bytes), setting limit message", len(e.RawContent))
+			body = limitMsg
+			htmlBody = plainTextToHTML(limitMsg)
 		} else {
-			log.Printf("  SKIP: Parser found no body or HTML in raw_content")
-			skipped++
-			continue
+			parsed, err := parser.Parse(e.RawContent)
+			if err != nil {
+				log.Printf("  SKIP: Failed to parse raw_content: %v", err)
+				skipped++
+				continue
+			}
+
+			if parsed.HTMLBody != "" {
+				htmlBody = parsed.HTMLBody
+				body = parsed.HTMLBody
+			} else if parsed.Body != "" {
+				htmlBody = plainTextToHTML(parsed.Body)
+				body = htmlBody
+			} else {
+				log.Printf("  SKIP: Parser found no body or HTML in raw_content")
+				skipped++
+				continue
+			}
 		}
 
 		// Update the email body and html_body
@@ -120,38 +131,42 @@ func main() {
 			continue
 		}
 
-		// Also re-extract attachments if parser found any that aren't in DB yet
-		if len(parsed.Attachments) > 0 {
-			var attCount int
-			db.QueryRow(`SELECT COUNT(*) FROM attachment WHERE email_id = $1`, e.ID).Scan(&attCount)
+		log.Printf("  OK: Updated body (%d chars), html_body (%d chars)", len(body), len(htmlBody))
 
-			if attCount == 0 {
-				for _, att := range parsed.Attachments {
-					attID := generateUUIDv7()
-					attData := att.Data
+		// Also re-extract attachments if parser found any that aren't in DB yet (only for emails under size limit)
+		if len(e.RawContent) <= MaxEmailSize {
+			parsed, err := parser.Parse(e.RawContent)
+			if err == nil && len(parsed.Attachments) > 0 {
+				var attCount int
+				db.QueryRow(`SELECT COUNT(*) FROM attachment WHERE email_id = $1`, e.ID).Scan(&attCount)
 
-					// Redact large attachments (>2MB) to avoid database bloat
-					if len(attData) > MaxAttachmentSize {
-						redactedMsg := fmt.Sprintf("<attachment redacted: %s, original size: %d bytes, exceeds %d MB limit>",
-							att.Filename, len(attData), MaxAttachmentSize/(1024*1024))
-						attData = []byte(redactedMsg)
-						log.Printf("  Attachment redacted: %s (%d bytes > %d bytes limit)", att.Filename, len(att.Data), MaxAttachmentSize)
-					}
+				if attCount == 0 {
+					for _, att := range parsed.Attachments {
+						attID := generateUUIDv7()
+						attData := att.Data
 
-					_, err := db.Exec(`
-						INSERT INTO attachment (id, email_id, filename, content_type, data)
-						VALUES ($1, $2, $3, $4, $5)
-					`, attID, e.ID, att.Filename, att.ContentType, attData)
-					if err != nil {
-						log.Printf("  WARN: Failed to insert attachment %s: %v", att.Filename, err)
-					} else {
-						log.Printf("  Inserted attachment: %s (%s, %d bytes)", att.Filename, att.ContentType, len(att.Data))
+						// Redact large attachments (>2MB) to avoid database bloat
+						if len(attData) > MaxAttachmentSize {
+							redactedMsg := fmt.Sprintf("<attachment redacted: %s, original size: %d bytes, exceeds %d MB limit>",
+								att.Filename, len(attData), MaxAttachmentSize/(1024*1024))
+							attData = []byte(redactedMsg)
+							log.Printf("  Attachment redacted: %s (%d bytes > %d bytes limit)", att.Filename, len(att.Data), MaxAttachmentSize)
+						}
+
+						_, err := db.Exec(`
+							INSERT INTO attachment (id, email_id, filename, content_type, data)
+							VALUES ($1, $2, $3, $4, $5)
+						`, attID, e.ID, att.Filename, att.ContentType, attData)
+						if err != nil {
+							log.Printf("  WARN: Failed to insert attachment %s: %v", att.Filename, err)
+						} else {
+							log.Printf("  Inserted attachment: %s (%s, %d bytes)", att.Filename, att.ContentType, len(att.Data))
+						}
 					}
 				}
 			}
 		}
 
-		log.Printf("  OK: Updated body (%d chars), html_body (%d chars)", len(body), len(htmlBody))
 		updated++
 	}
 

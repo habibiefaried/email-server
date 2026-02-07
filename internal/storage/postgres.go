@@ -18,6 +18,9 @@ const (
 	// MaxAttachmentSize is the maximum size (in bytes) for storing attachment data.
 	// Attachments larger than this will be replaced with a redacted placeholder.
 	MaxAttachmentSize = 2 * 1024 * 1024 // 2 MB
+	// MaxEmailSize is the maximum size (in bytes) for displaying email raw content.
+	// Emails larger than this will show a limit message instead of parsed content.
+	MaxEmailSize = 512 * 1024 // 512 KB
 )
 
 // PostgresStorage implements Storage interface with Postgres backend
@@ -303,50 +306,45 @@ func (ps *PostgresStorage) GetEmailByID(id string) (*EmailDetail, error) {
 		rawContentStr = rawContent.String
 	}
 
-	// If body is empty, try to parse raw_content and generate HTML
-	if email.Body == "" && email.HTMLBody == "" && rawContentStr != "" {
-		if parsed, err := parser.Parse(rawContentStr); err == nil {
-			if parsed.HTMLBody != "" {
-				email.HTMLBody = parsed.HTMLBody
-				email.Body = parsed.HTMLBody
-			} else if parsed.Body != "" {
-				email.Body = plainTextToHTML(parsed.Body)
-				email.HTMLBody = email.Body
+	// Check if email exceeds 512KB limit
+	if len(rawContentStr) > MaxEmailSize {
+		limitMsg := "Limit of this service is 512kb only"
+		log.Printf("Email %s exceeds 512KB limit (%d bytes), returning limit message", id, len(rawContentStr))
+		email.Body = limitMsg
+		email.HTMLBody = plainTextToHTML(limitMsg)
+	} else {
+		// If body is empty, try to parse raw_content and generate HTML
+		if email.Body == "" && email.HTMLBody == "" && rawContentStr != "" {
+			if parsed, err := parser.Parse(rawContentStr); err == nil {
+				if parsed.HTMLBody != "" {
+					email.HTMLBody = parsed.HTMLBody
+					email.Body = parsed.HTMLBody
+				} else if parsed.Body != "" {
+					email.Body = plainTextToHTML(parsed.Body)
+					email.HTMLBody = email.Body
+				} else {
+					// Parser found no body/HTML - use raw_content directly as fallback
+					log.Printf("Parser found no body for email %s, using raw_content as plain text fallback (%d bytes)", id, len(rawContentStr))
+					email.Body = plainTextToHTML(rawContentStr)
+					email.HTMLBody = email.Body
+				}
 			} else {
-				// Parser found no body/HTML - use raw_content directly as fallback
-				log.Printf("Parser found no body for email %s, using raw_content as plain text fallback (%d bytes)", id, len(rawContentStr))
+				// Parser failed - use raw_content directly as fallback
+				log.Printf("Parser failed for email %s: %v, using raw_content as plain text fallback", id, err)
 				email.Body = plainTextToHTML(rawContentStr)
 				email.HTMLBody = email.Body
 			}
-		} else {
-			// Parser failed - use raw_content directly as fallback
-			log.Printf("Parser failed for email %s: %v, using raw_content as plain text fallback", id, err)
-			email.Body = plainTextToHTML(rawContentStr)
-			email.HTMLBody = email.Body
 		}
-	}
 
-	// If we have HTMLBody but no Body, use HTMLBody as Body
-	if email.Body == "" && email.HTMLBody != "" {
-		email.Body = email.HTMLBody
-	}
+		// If we have HTMLBody but no Body, use HTMLBody as Body
+		if email.Body == "" && email.HTMLBody != "" {
+			email.Body = email.HTMLBody
+		}
 
-	// If we still only have plain text Body and no HTMLBody, convert to HTML
-	if email.Body != "" && email.HTMLBody == "" {
-		email.HTMLBody = plainTextToHTML(email.Body)
-		email.Body = email.HTMLBody
-	}
-
-	// Embed inline CID images as base64 data URIs for frontend rendering
-	if rawContentStr != "" && email.HTMLBody != "" {
-		if parsed, err := parser.Parse(rawContentStr); err == nil {
-			embedded := embedInlineImages(email.HTMLBody, parsed.Attachments)
-			if embedded != email.HTMLBody {
-				email.HTMLBody = embedded
-				email.Body = embedded
-			}
-		} else {
-			log.Printf("Inline embed parse failed for email %s: %v", id, err)
+		// If we still only have plain text Body and no HTMLBody, convert to HTML
+		if email.Body != "" && email.HTMLBody == "" {
+			email.HTMLBody = plainTextToHTML(email.Body)
+			email.Body = email.HTMLBody
 		}
 	}
 
@@ -399,27 +397,4 @@ func plainTextToHTML(text string) string {
 	}
 	body := strings.Join(lines, "<br>\n")
 	return fmt.Sprintf(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family:sans-serif;padding:16px;white-space:pre-wrap;">%s</body></html>`, body)
-}
-
-func embedInlineImages(htmlBody string, attachments []parser.Attachment) string {
-	updated := htmlBody
-	for _, att := range attachments {
-		if att.ContentID == "" || len(att.Data) == 0 {
-			continue
-		}
-		mimeType := att.ContentType
-		if mimeType == "" {
-			mimeType = "application/octet-stream"
-		}
-		data := att.Data
-		if len(data) > MaxAttachmentSize {
-			redactedMsg := fmt.Sprintf("<attachment redacted: %s, original size: %d bytes, exceeds %d MB limit>",
-				att.Filename, len(data), MaxAttachmentSize/(1024*1024))
-			data = []byte(redactedMsg)
-			mimeType = "text/plain"
-		}
-		dataURI := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
-		updated = strings.ReplaceAll(updated, "cid:"+att.ContentID, dataURI)
-	}
-	return updated
 }
