@@ -88,17 +88,23 @@ func main() {
 		fmt.Fprintln(w, "OK")
 	})
 
-	// Inbox API endpoint
+	// Inbox API endpoint (summary list, 5 per page)
 	http.HandleFunc("/inbox", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		// Set CORS headers immediately
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if postgres is available
@@ -108,37 +114,28 @@ func main() {
 		}
 
 		// Get email address from query parameter
-		address := r.URL.Query().Get("name")
+		address := r.URL.Query().Get("email")
 		if address == "" {
-			http.Error(w, "Missing 'name' query parameter", http.StatusBadRequest)
+			http.Error(w, "Missing 'email' query parameter", http.StatusBadRequest)
 			return
 		}
 
-		// Get pagination parameters with defaults
-		limit := 100
-		offset := 0
-
-		if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-			if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 1000 {
-				limit = parsedLimit
+		// Get page parameter (default 1)
+		page := 1
+		if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+			if parsedPage, err := strconv.Atoi(pageStr); err == nil && parsedPage >= 1 {
+				page = parsedPage
 			}
 		}
 
-		if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
-			if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
-				offset = parsedOffset
-			}
-		}
-
-		// Fetch emails from postgres
-		emails, err := pgStore.GetEmailsByAddress(address, limit, offset)
+		// Fetch email summaries (5 per page, no body/attachments)
+		emails, err := pgStore.GetInbox(address, page)
 		if err != nil {
-			log.Printf("Error fetching emails for %s: %v", address, err)
+			log.Printf("Error fetching inbox for %s: %v", address, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 
-		// Return JSON response
 		if err := json.NewEncoder(w).Encode(emails); err != nil {
 			log.Printf("Error encoding JSON: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -146,20 +143,57 @@ func main() {
 		}
 	})
 
-	// Handle CORS preflight requests
-	http.HandleFunc("/inbox/", func(w http.ResponseWriter, r *http.Request) {
+	// Email detail endpoint (full content by UUIDv7)
+	http.HandleFunc("/email", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
 		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		http.NotFound(w, r)
+
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if pgStore == nil {
+			http.Error(w, "Postgres storage not configured", http.StatusServiceUnavailable)
+			return
+		}
+
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			http.Error(w, "Missing 'id' query parameter", http.StatusBadRequest)
+			return
+		}
+
+		email, err := pgStore.GetEmailByID(id)
+		if err != nil {
+			log.Printf("Error fetching email %s: %v", id, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		if email == nil {
+			http.Error(w, "Email not found", http.StatusNotFound)
+			return
+		}
+
+		if err := json.NewEncoder(w).Encode(email); err != nil {
+			log.Printf("Error encoding JSON: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 	})
 
 	log.Printf("Starting HTTP API on %s", addr)
-	log.Printf("Endpoints: / (health check), /inbox?name=<address> (fetch emails)")
+	log.Printf("Endpoints: / (health), /inbox?email=<address> (list), /email?id=<uuid> (detail)")
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("Failed to start HTTP server: %v", err)
 	}

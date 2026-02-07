@@ -9,8 +9,12 @@ A simple SMTP server in Go using the `go-smtp` library.
 - Logs sender, recipient, and email body to console
 - Prints required DNS records for mail delivery
 - Stores emails to PostgreSQL database with attachment tracking
+- UUIDv7 primary keys (timestamp-sortable, no guessable IDs)
+- Base64 email content decoded before database insertion
+- **Attachment size limit: 2MB** — larger attachments are redacted to avoid database bloat
+- **Email size limit: 512KB** — emails larger than this will show a limit message instead of parsed content
 - Fallback to file storage when database is unavailable
-- HTTP API for fetching emails with pagination support
+- HTTP API: `/inbox` (summary list) and `/email` (full detail)
 - Fully tested with automated CI/CD pipeline
 - Does NOT forward emails (for testing/learning only)
 
@@ -85,51 +89,73 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
   curl http://localhost:48080/
   ```
 
-### Inbox API
-- **Endpoint:** `GET /inbox?name=<email_address>&limit=<n>&offset=<n>`
-- **Description:** Fetch emails for a specific recipient address from PostgreSQL
+### Inbox API (Summary List)
+- **Endpoint:** `GET /inbox?email=<address>&page=<n>`
+- **Description:** Fetch email summaries (no body or attachments) for a recipient, sorted by received timestamp descending
 - **Query Parameters:**
-  - `name` (required) — Email address to filter by
-  - `limit` (optional) — Number of emails to return (default: 100, max: 1000)
-  - `offset` (optional) — Number of emails to skip (default: 0)
-- **Response:** JSON array of email objects with attachments metadata
+  - `email` (required) — Recipient email address to filter by
+  - `page` (optional) — Page number, 1-based (default: 1). Each page returns 5 emails.
+- **Response:** JSON array of up to **5** email summaries per page
 - **CORS:** Enabled for cross-origin requests (React/frontend integration)
 - **Requires:** PostgreSQL storage must be configured (`DB_URL` environment variable)
 - **Examples:**
   ```bash
-  # Get first 100 emails (default)
-  curl http://localhost:48080/inbox?name=test@example.com
+  # Get latest 5 emails (page 1)
+  curl http://localhost:48080/inbox?email=test@example.com
   
-  # Get first 20 emails
-  curl http://localhost:48080/inbox?name=test@example.com&limit=20
-  
-  # Get next 20 emails (pagination)
-  curl http://localhost:48080/inbox?name=test@example.com&limit=20&offset=20
+  # Get emails 6-10 (page 2)
+  curl http://localhost:48080/inbox?email=test@example.com&page=2
   ```
 - **Response Format:**
   ```json
   [
     {
-      "id": 1,
+      "id": "0194d3f0-7e1a-7b12-9a3f-4c5d6e7f8a9b",
       "from": "sender@example.com",
       "to": "test@example.com",
       "subject": "Test Email",
       "date": "Wed, 5 Feb 2026 10:30:00 +0000",
-      "body": "Email body content (HTML-ready)",
-      "created_at": "2026-02-06T08:30:00Z",
-      "attachments": [
-        {
-          "id": 1,
-          "filename": "document.pdf",
-          "content_type": "application/pdf",
-          "size": 52480
-        }
-      ]
+      "created_at": "2026-02-06T08:30:00Z"
     }
   ]
   ```
 
-**Note:** The API supports pagination through `limit` and `offset` parameters. By default, it returns the latest 100 emails for the specified address, ordered by creation time (newest first). Maximum limit is 1000 emails per request. The `body` field contains the parsed email body ready for HTML rendering in React.js or other frontends.
+### Email Detail API
+- **Endpoint:** `GET /email?id=<uuidv7>`
+- **Description:** Fetch full email detail including body (HTML-rendered), HTML body, and attachments (with base64 data) by UUIDv7 ID. If no parsed body/HTML is available, the raw email content is re-parsed and converted to HTML automatically.
+- **Query Parameters:**
+  - `id` (required) — UUIDv7 of the email
+- **Response:** JSON object with full email content and attachment data
+- **CORS:** Enabled for cross-origin requests
+- **Examples:**
+  ```bash
+  # Get full email detail
+  curl http://localhost:48080/email?id=0194d3f0-7e1a-7b12-9a3f-4c5d6e7f8a9b
+  ```
+- **Response Format:**
+  ```json
+  {
+    "id": "0194d3f0-7e1a-7b12-9a3f-4c5d6e7f8a9b",
+    "from": "sender@example.com",
+    "to": "test@example.com",
+    "subject": "Test Email",
+    "date": "Wed, 5 Feb 2026 10:30:00 +0000",
+    "body": "<!DOCTYPE html><html>...rendered HTML...</html>",
+    "html_body": "<html>...</html>",
+    "created_at": "2026-02-06T08:30:00Z",
+    "attachments": [
+      {
+        "id": "0194d3f0-7e1b-7c34-8b2e-1a2b3c4d5e6f",
+        "filename": "document.pdf",
+        "content_type": "application/pdf",
+        "size": 52480,
+        "data": "JVBERi0xLjQK...base64-encoded..."
+      }
+    ]
+  }
+  ```
+
+**Note:** The `/inbox` endpoint returns **5 emails per page** (no body or attachments) for fast listing. Use `/email?id=<uuid>` to fetch the full content of a specific email including base64-encoded attachment data. **Attachments larger than 2MB are automatically redacted** with a placeholder message to prevent database bloat. **Emails with raw content larger than 512KB** will display "Limit of this service is 512kb only" as the body instead of parsed content. If body/HTML are empty, the server re-parses `raw_content` and generates HTML automatically. Plain text bodies are wrapped in a basic HTML template. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
 
 
 Below are real-world screenshots and explanations of the server in action:
@@ -239,22 +265,24 @@ When `DB_URL` is provided, the server automatically creates two tables:
 
 ### email table
 Stores email metadata and content:
-- `id` (SERIAL PRIMARY KEY) — Unique email ID
+- `id` (UUID PRIMARY KEY) — UUIDv7 via `github.com/google/uuid` (timestamp-sortable, non-guessable)
 - `from` (TEXT) — Sender email address
 - `to` (TEXT) — Recipient email address  
 - `subject` (TEXT) — Email subject
 - `date` (TEXT) — Email send date
-- `body` (TEXT) — Parsed email body
+- `body` (TEXT) — Parsed email body (base64 decoded)
+- `html_body` (TEXT) — HTML body (base64 decoded)
 - `raw_content` (TEXT) — Full raw email content
 - `created_at` (TIMESTAMP) — Record creation time
 
 ### attachment table
 Stores email attachments:
-- `id` (SERIAL PRIMARY KEY) — Unique attachment ID
-- `email_id` (INTEGER FK) — Foreign key to email table
+- `id` (UUID PRIMARY KEY) — UUIDv7
+- `email_id` (UUID FK) — Foreign key to email table
 - `filename` (TEXT) — Original filename
 - `content_type` (TEXT) — MIME type (e.g., image/png)
-- `data` (BYTEA) — Binary attachment data
+- `data` (BYTEA) — Binary attachment data (base64 decoded)
+  - **Size limit:** Attachments larger than **2MB** are automatically replaced with a redacted placeholder message to prevent database bloat
 - `created_at` (TIMESTAMP) — Record creation time
 
 ## Storage Options
@@ -297,18 +325,19 @@ docker run -e SMTP_PORT=25 email-server
 - ✅ Valid email addresses with data
 - ✅ Non-existent addresses (empty results)
 - ✅ Missing required parameters (400 error)
-- ✅ Pagination with limit parameter
-- ✅ Pagination with offset parameter
-- ✅ Invalid/malformed parameters
-- ✅ Negative offsets handling
-- ✅ Excessive limit values
-- ✅ Attachment metadata validation
+- ✅ Pagination with page parameter
+- ✅ Negative page handling
 - ✅ Empty email addresses
 - ✅ CORS headers verification
+- ✅ Email detail by UUIDv7 (`/email?id=`)
+- ✅ Non-existent email ID (404 error)
+- ✅ Missing email ID parameter (400 error)
+- ✅ UUIDv7 format validation
 - ✅ Custom generated emails (5 unique scenarios)
 - ✅ Special characters and Unicode handling
 - ✅ Long content storage and retrieval
 - ✅ Multi-recipient email isolation
+- ✅ Attachment metadata validation
 
 ### Test Data
 The CI pipeline automatically:
@@ -337,7 +366,10 @@ go tool cover -html=coverage.out
 ./scripts/test-emails.sh localhost 25
 
 # Then verify via API
-curl "http://localhost:48080/inbox?name=testuser@example.com" | jq
+curl "http://localhost:48080/inbox?email=testuser@example.com" | jq
+
+# Get full detail for a specific email
+curl "http://localhost:48080/email?id=<uuid-from-inbox>" | jq
 ```
 
 ### Continuous Integration

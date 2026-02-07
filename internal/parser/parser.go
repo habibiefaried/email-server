@@ -1,10 +1,12 @@
 package parser
 
 import (
+	"bytes"
 	"encoding/base64"
 	"io"
 	"mime"
 	"mime/multipart"
+	"mime/quotedprintable"
 	"net/mail"
 	"strings"
 )
@@ -25,6 +27,7 @@ type Email struct {
 type Attachment struct {
 	Filename    string
 	ContentType string
+	ContentID   string
 	Data        []byte
 }
 
@@ -92,38 +95,35 @@ func Parse(rawContent string) (*Email, error) {
 
 			body, _ := io.ReadAll(part)
 
+			transferEncoding := strings.ToLower(part.Header.Get("Content-Transfer-Encoding"))
+			contentID := normalizeContentID(part.Header.Get("Content-ID"))
 			if (strings.HasPrefix(disposition, "attachment") ||
 				(strings.HasPrefix(disposition, "inline") && filename != "")) &&
 				filename != "" {
-				transferEncoding := strings.ToLower(part.Header.Get("Content-Transfer-Encoding"))
-				var data []byte
-				if strings.Contains(transferEncoding, "base64") {
-					data, _ = base64.StdEncoding.DecodeString(string(body))
-				} else {
-					data = body
-				}
-
+				data := decodeTransfer(body, transferEncoding)
 				parsed.Attachments = append(parsed.Attachments, Attachment{
 					Filename:    filename,
 					ContentType: partMediaType,
+					ContentID:   contentID,
 					Data:        data,
 				})
 			} else if strings.HasPrefix(partMediaType, "text/") {
-				// Extract both plain text and HTML versions
+				decodedBody := decodeTransfer(body, transferEncoding)
 				if strings.HasPrefix(partMediaType, "text/html") {
-					parsed.HTMLBody = string(body)
+					parsed.HTMLBody = string(decodedBody)
 				} else if strings.HasPrefix(partMediaType, "text/plain") {
-					parsed.Body = string(body)
+					parsed.Body = string(decodedBody)
 				}
 			}
 		}
 	} else {
 		body, _ := io.ReadAll(msg.Body)
-		// For non-multipart emails, assign based on content type
+		transferEncoding := strings.ToLower(msg.Header.Get("Content-Transfer-Encoding"))
+		decodedBody := decodeTransfer(body, transferEncoding)
 		if strings.HasPrefix(mediaType, "text/html") {
-			parsed.HTMLBody = string(body)
+			parsed.HTMLBody = string(decodedBody)
 		} else {
-			parsed.Body = string(body)
+			parsed.Body = string(decodedBody)
 		}
 	}
 
@@ -135,4 +135,28 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func normalizeContentID(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "<")
+	value = strings.TrimSuffix(value, ">")
+	return value
+}
+
+func decodeTransfer(body []byte, encoding string) []byte {
+	if strings.Contains(encoding, "base64") {
+		decoded, err := base64.StdEncoding.DecodeString(string(body))
+		if err == nil {
+			return decoded
+		}
+	}
+	if strings.Contains(encoding, "quoted-printable") {
+		reader := quotedprintable.NewReader(bytes.NewReader(body))
+		decoded, err := io.ReadAll(reader)
+		if err == nil {
+			return decoded
+		}
+	}
+	return body
 }
