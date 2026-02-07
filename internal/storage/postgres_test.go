@@ -99,24 +99,3 @@ func TestEmailDetail_HasBodyAndAttachments(t *testing.T) {
 		t.Errorf("EmailDetail ID should be valid UUID: %v", err)
 	}
 }
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && containsHelper(s, substr)
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func TestMaxAttachmentSize(t *testing.T) {
-	// Verify the MaxEmailSize constant is set to 512KB
-	expected := 512 * 1024
-	if MaxEmailSize != expected {
-		t.Errorf("MaxEmailSize = %d, want %d (512KB)", MaxEmailSize, expected)
-	}
-}

@@ -14,12 +14,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const (
-	// MaxEmailSize is the maximum size (in bytes) for displaying email raw content.
-	// Emails larger than this will show a limit message instead of parsed content.
-	MaxEmailSize = 512 * 1024 // 512 KB
-)
-
 type emailRow struct {
 	ID         string
 	RawContent string
@@ -84,33 +78,26 @@ func main() {
 
 		var body string
 
-		// Check if email exceeds 512KB limit
-		if len(e.RawContent) > MaxEmailSize {
-			limitMsg := "Limit of this service is 512kb only"
-			log.Printf("  Email exceeds 512KB limit (%d bytes), setting limit message", len(e.RawContent))
-			body = limitMsg
-		} else {
-			// Parse with enmime
-			env, err := enmime.ReadEnvelope(strings.NewReader(e.RawContent))
-			if err != nil {
-				log.Printf("  SKIP: Failed to parse raw_content: %v", err)
-				skipped++
-				continue
-			}
+		// Parse with enmime
+		env, err := enmime.ReadEnvelope(strings.NewReader(e.RawContent))
+		if err != nil {
+			log.Printf("  SKIP: Failed to parse raw_content: %v", err)
+			skipped++
+			continue
+		}
 
-			// Check for parsing errors
-			if len(env.Errors) > 0 {
-				log.Printf("  Warning: %d parsing errors", len(env.Errors))
-			}
+		// Check for parsing errors
+		if len(env.Errors) > 0 {
+			log.Printf("  Warning: %d parsing errors", len(env.Errors))
+		}
 
-			// Convert to HTML with inline images
-			body = emailToHTML(env)
+		// Convert to HTML with inline images
+		body = emailToHTML(env)
 
-			if body == "" {
-				log.Printf("  SKIP: No body generated from email")
-				skipped++
-				continue
-			}
+		if body == "" {
+			log.Printf("  SKIP: No body generated from email")
+			skipped++
+			continue
 		}
 
 		// Update the email body

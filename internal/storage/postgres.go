@@ -15,12 +15,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const (
-	// MaxEmailSize is the maximum size (in bytes) for displaying email raw content.
-	// Emails larger than this will show a limit message instead of parsed content.
-	MaxEmailSize = 512 * 1024 // 512 KB
-)
-
 // PostgresStorage implements Storage interface with Postgres backend
 type PostgresStorage struct {
 	db *sql.DB
@@ -93,22 +87,6 @@ func generateUUIDv7() string {
 // Save saves an email and its attachments to postgres
 // Base64 content is decoded by the parser BEFORE inserting into the database
 func (ps *PostgresStorage) Save(email Email) (string, error) {
-	// Check email size limit
-	if len(email.Content) > MaxEmailSize {
-		limitMsg := "Limit of this service is 512kb only"
-		emailID := generateUUIDv7()
-		_, err := ps.db.Exec(
-			`INSERT INTO email (id, "from", "to", subject, date, body, raw_content)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-			emailID, email.From, email.To, "", "", limitMsg, email.Content,
-		)
-		if err != nil {
-			return "", err
-		}
-		log.Printf("Email saved (size limit exceeded): id=%s, from=%s, to=%s", emailID, email.From, email.To)
-		return emailID, nil
-	}
-
 	// Parse email using enmime
 	env, err := enmime.ReadEnvelope(strings.NewReader(email.Content))
 	if err != nil {
@@ -244,19 +222,14 @@ func (ps *PostgresStorage) GetEmailByID(id string) (*EmailDetail, error) {
 	if email.Body == "" && rawContent.Valid && rawContent.String != "" {
 		rawContentStr := rawContent.String
 
-		// Check size limit
-		if len(rawContentStr) > MaxEmailSize {
-			email.Body = "Limit of this service is 512kb only"
+		// Re-parse with enmime
+		if env, err := enmime.ReadEnvelope(strings.NewReader(rawContentStr)); err == nil {
+			email.Body = emailToHTML(env)
+			// Update database so we don't reprocess again
+			ps.db.Exec(`UPDATE email SET body = $1 WHERE id = $2`, email.Body, id)
 		} else {
-			// Re-parse with enmime
-			if env, err := enmime.ReadEnvelope(strings.NewReader(rawContentStr)); err == nil {
-				email.Body = emailToHTML(env)
-				// Update database so we don't reprocess again
-				ps.db.Exec(`UPDATE email SET body = $1 WHERE id = $2`, email.Body, id)
-			} else {
-				log.Printf("Failed to reprocess email %s: %v", id, err)
-				email.Body = "<pre>Email parsing failed</pre>"
-			}
+			log.Printf("Failed to reprocess email %s: %v", id, err)
+			email.Body = "<pre>Email parsing failed</pre>"
 		}
 	}
 

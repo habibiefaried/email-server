@@ -11,7 +11,6 @@ A simple SMTP server in Go using the `go-smtp` library.
 - Stores emails to PostgreSQL database (raw content + HTML body)
 - UUIDv7 primary keys (timestamp-sortable, no guessable IDs)
 - Base64 email content decoded before database insertion
-- **Email size limit: 512KB** — emails larger than this will show a limit message instead of parsed content
 - HTML body is generated from raw MIME content using enmime (inline images embedded as data URIs)
 - Fallback to file storage when database is unavailable
 - HTTP API: `/inbox` (summary list) and `/email` (full detail)
@@ -145,7 +144,7 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
   }
   ```
 
-**Note:** The `/inbox` endpoint returns **5 emails per page** (no body) for fast listing. Use `/email?id=<uuid>` to fetch the full HTML body of a specific email. **Emails with raw content larger than 512KB** will display "Limit of this service is 512kb only" as the body instead of parsed content. The server uses enmime to parse raw MIME content and embeds inline images as data URIs. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
+**Note:** The `/inbox` endpoint returns **5 emails per page** (no body) for fast listing. Use `/email?id=<uuid>` to fetch the full HTML body of a specific email. The server uses enmime to parse raw MIME content and embeds inline images as data URIs. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
 
 
 Below are real-world screenshots and explanations of the server in action:
