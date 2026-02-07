@@ -312,7 +312,17 @@ func (ps *PostgresStorage) GetEmailByID(id string) (*EmailDetail, error) {
 			} else if parsed.Body != "" {
 				email.Body = plainTextToHTML(parsed.Body)
 				email.HTMLBody = email.Body
+			} else {
+				// Parser found no body/HTML - use raw_content directly as fallback
+				log.Printf("Parser found no body for email %s, using raw_content as plain text fallback (%d bytes)", id, len(email.RawContent))
+				email.Body = plainTextToHTML(email.RawContent)
+				email.HTMLBody = email.Body
 			}
+		} else {
+			// Parser failed - use raw_content directly as fallback
+			log.Printf("Parser failed for email %s: %v, using raw_content as plain text fallback", id, err)
+			email.Body = plainTextToHTML(email.RawContent)
+			email.HTMLBody = email.Body
 		}
 	}
 
