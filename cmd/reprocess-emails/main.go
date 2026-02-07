@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jhillyerd/enmime"
@@ -35,6 +36,17 @@ func main() {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 	log.Println("Connected to database")
+
+	// Read email size limit from environment (default 512KB = 524288 bytes)
+	maxEmailSize := int64(524288)
+	if envSize := os.Getenv("EMAIL_SIZE_LIMIT"); envSize != "" {
+		if parsed, err := strconv.ParseInt(envSize, 10, 64); err == nil {
+			maxEmailSize = parsed
+			log.Printf("Email size limit set to %d bytes", maxEmailSize)
+		} else {
+			log.Printf("Warning: Invalid EMAIL_SIZE_LIMIT value %q, using default 512KB", envSize)
+		}
+	}
 
 	// Find emails with raw_content but empty/null body
 	rows, err := db.Query(`
@@ -77,6 +89,13 @@ func main() {
 		log.Printf("[%d/%d] Processing email %s...", i+1, total, e.ID)
 
 		var body string
+
+		// Check email size limit
+		if int64(len(e.RawContent)) > maxEmailSize {
+			log.Printf("  SKIP: Email exceeds size limit (%d > %d bytes)", len(e.RawContent), maxEmailSize)
+			skipped++
+			continue
+		}
 
 		// Parse with enmime
 		env, err := enmime.ReadEnvelope(strings.NewReader(e.RawContent))

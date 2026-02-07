@@ -46,6 +46,7 @@ The server prints a table of required DNS records (A, MX, PTR) and their status.
 | MAIL_SERVERS  | No       | (Optional) List of FQDN,IP pairs separated by `:` (see example above). If not set the program will print `Email server is running` and expose a simple HTTP health endpoint at `/`.       |
 | SMTP_PORT     | No       | (Optional) SMTP server port. Defaults to `2525` if not set. Use port `25` for production or when running as root.       |
 | HTTP_PORT     | No       | (Optional) HTTP health port. Defaults to `48080` if not set.      |
+| EMAIL_SIZE_LIMIT | No    | (Optional) Maximum email size in bytes before rejection. Defaults to `524288` (512KB). Emails exceeding this limit will be stored with error message: "Sorry, the email exceeds our limit (512kb)". This is a soft limit checked before expensive MIME parsing to prevent memory exhaustion. Set to `0` to disable limit.       |
 | DB_URL        | No       | (Optional) PostgreSQL connection string (works with Neon, AWS RDS, or any PostgreSQL). If provided, emails are saved to database only. Falls back to file storage if connection fails. Format: `user=username password=pass dbname=emaildb host=hostname port=5432 sslmode=require`       |
 
 **Note:** For Neon PostgreSQL, always use `sslmode=require`. For local PostgreSQL, you can use `sslmode=disable`.

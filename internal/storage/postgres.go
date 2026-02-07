@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,11 +19,13 @@ import (
 
 // PostgresStorage implements Storage interface with Postgres backend
 type PostgresStorage struct {
-	db *sql.DB
+	db           *sql.DB
+	maxEmailSize int64 // Maximum email size in bytes (default 512KB)
 }
 
 // NewPostgresStorage creates a new postgres storage instance
 // dsn format: "user=username password=pass dbname=emaildb host=localhost port=5432 sslmode=disable"
+// EMAIL_SIZE_LIMIT env var controls max email size in bytes (default 524288 = 512KB)
 func NewPostgresStorage(dsn string) (*PostgresStorage, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -33,12 +37,26 @@ func NewPostgresStorage(dsn string) (*PostgresStorage, error) {
 		return nil, err
 	}
 
-	ps := &PostgresStorage{db: db}
+	// Read email size limit from environment (default 512KB = 524288 bytes)
+	maxEmailSize := int64(524288) // 512KB default
+	if envSize := os.Getenv("EMAIL_SIZE_LIMIT"); envSize != "" {
+		if parsed, err := strconv.ParseInt(envSize, 10, 64); err == nil {
+			maxEmailSize = parsed
+			log.Printf("Email size limit set to %d bytes", maxEmailSize)
+		} else {
+			log.Printf("Warning: Invalid EMAIL_SIZE_LIMIT value %q, using default 512KB", envSize)
+		}
+	}
+
+	ps := &PostgresStorage{
+		db:           db,
+		maxEmailSize: maxEmailSize,
+	}
 	if err := ps.createTables(); err != nil {
 		return nil, err
 	}
 
-	log.Printf("Connected to Postgres database")
+	log.Printf("Connected to Postgres database (max email size: %d bytes)", ps.maxEmailSize)
 	return ps, nil
 }
 
@@ -87,6 +105,21 @@ func generateUUIDv7() string {
 // Save saves an email and its attachments to postgres
 // Base64 content is decoded by the parser BEFORE inserting into the database
 func (ps *PostgresStorage) Save(email Email) (string, error) {
+	// Check email size limit before parsing
+	if int64(len(email.Content)) > ps.maxEmailSize {
+		log.Printf("Warning: Email exceeds size limit (%d > %d bytes), storing error message", len(email.Content), ps.maxEmailSize)
+		emailID := generateUUIDv7()
+		_, err := ps.db.Exec(
+			`INSERT INTO email (id, "from", "to", subject, date, body, raw_content)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			emailID, email.From, email.To, "", "", "Sorry, the email exceeds our limit (512kb)", email.Content,
+		)
+		if err != nil {
+			return "", err
+		}
+		return emailID, nil
+	}
+
 	// Parse email using enmime
 	env, err := enmime.ReadEnvelope(strings.NewReader(email.Content))
 	if err != nil {
