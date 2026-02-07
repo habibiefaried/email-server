@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net/mail"
 	"os"
 	"regexp"
 	"strconv"
@@ -102,17 +103,47 @@ func generateUUIDv7() string {
 	return id.String()
 }
 
+func extractHeadersFromRawContent(raw string) (string, string, string, string) {
+	if raw == "" {
+		return "", "", "", ""
+	}
+
+	// Read only the header section to avoid expensive parsing.
+	headerEnd := strings.Index(raw, "\r\n\r\n")
+	if headerEnd == -1 {
+		headerEnd = strings.Index(raw, "\n\n")
+	}
+	if headerEnd == -1 {
+		headerEnd = len(raw)
+	}
+
+	headers := raw[:headerEnd] + "\r\n\r\n"
+	msg, err := mail.ReadMessage(strings.NewReader(headers))
+	if err != nil {
+		return "", "", "", ""
+	}
+
+	return msg.Header.Get("From"), msg.Header.Get("To"), msg.Header.Get("Subject"), msg.Header.Get("Date")
+}
+
 // Save saves an email and its attachments to postgres
 // Base64 content is decoded by the parser BEFORE inserting into the database
 func (ps *PostgresStorage) Save(email Email) (string, error) {
 	// Check email size limit before parsing
-	if int64(len(email.Content)) > ps.maxEmailSize {
+	if ps.maxEmailSize > 0 && int64(len(email.Content)) > ps.maxEmailSize {
 		log.Printf("Warning: Email exceeds size limit (%d > %d bytes), storing error message", len(email.Content), ps.maxEmailSize)
+		from, to, subject, date := extractHeadersFromRawContent(email.Content)
+		if from == "" {
+			from = email.From
+		}
+		if to == "" {
+			to = email.To
+		}
 		emailID := generateUUIDv7()
 		_, err := ps.db.Exec(
 			`INSERT INTO email (id, "from", "to", subject, date, body, raw_content)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-			emailID, email.From, email.To, "", "", "Sorry, the email exceeds our limit (512kb)", email.Content,
+			emailID, from, to, subject, date, "Sorry, the email exceeds our limit (512kb)", "",
 		)
 		if err != nil {
 			return "", err
