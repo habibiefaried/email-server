@@ -84,66 +84,19 @@ func TestEmailSummary_NoBodyField(t *testing.T) {
 
 func TestEmailDetail_HasBodyAndAttachments(t *testing.T) {
 	d := EmailDetail{
-		ID:          generateUUIDv7(),
-		From:        "a@b.com",
-		To:          "c@d.com",
-		Subject:     "test",
-		Date:        "2026-01-01",
-		Body:        "Hello",
-		HTMLBody:    "<p>Hello</p>",
-		CreatedAt:   time.Now(),
-		Attachments: []AttachmentInfo{{ID: generateUUIDv7(), Filename: "file.txt", ContentType: "text/plain", Size: 100, Data: "SGVsbG8gV29ybGQ="}},
+		ID:        generateUUIDv7(),
+		From:      "a@b.com",
+		To:        "c@d.com",
+		Subject:   "test",
+		Date:      "2026-01-01",
+		Body:      "<p>Hello</p>",
+		CreatedAt: time.Now(),
 	}
 	if d.Body == "" {
 		t.Error("EmailDetail Body should not be empty")
 	}
-	if len(d.Attachments) != 1 {
-		t.Error("EmailDetail should have 1 attachment")
-	}
-	if _, err := uuid.Parse(d.Attachments[0].ID); err != nil {
-		t.Errorf("Attachment ID should be valid UUID: %v", err)
-	}
-}
-
-func TestAttachmentInfo_UUIDv7ID(t *testing.T) {
-	a := AttachmentInfo{
-		ID:          generateUUIDv7(),
-		Filename:    "test.png",
-		ContentType: "image/png",
-		Size:        1024,
-		Data:        "iVBORw0KGgo=",
-	}
-	parsed, err := uuid.Parse(a.ID)
-	if err != nil {
-		t.Fatalf("Attachment ID not parseable: %v", err)
-	}
-	if parsed.Version() != 7 {
-		t.Errorf("Expected UUID version 7, got %d", parsed.Version())
-	}
-	if a.Data == "" {
-		t.Error("Attachment Data should not be empty")
-	}
-}
-
-func TestPlainTextToHTML(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string // substring that must be present
-	}{
-		{"simple text", "Hello World", "Hello World"},
-		{"multiline", "Line 1\nLine 2", "<br>"},
-		{"html escaping", "a < b & c > d", "a &lt; b &amp; c &gt; d"},
-		{"url linkify", "Visit https://example.com today", `<a href="https://example.com">`},
-		{"wraps in html", "test", "<!DOCTYPE html>"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := plainTextToHTML(tc.input)
-			if !contains(result, tc.want) {
-				t.Errorf("plainTextToHTML(%q) = %q, want substring %q", tc.input, result, tc.want)
-			}
-		})
+	if _, err := uuid.Parse(d.ID); err != nil {
+		t.Errorf("EmailDetail ID should be valid UUID: %v", err)
 	}
 }
 
@@ -161,34 +114,9 @@ func containsHelper(s, substr string) bool {
 }
 
 func TestMaxAttachmentSize(t *testing.T) {
-	// Verify the constant is set to 2MB
-	expected := 2 * 1024 * 1024
-	if MaxAttachmentSize != expected {
-		t.Errorf("MaxAttachmentSize = %d, want %d (2MB)", MaxAttachmentSize, expected)
-	}
-}
-
-func TestAttachmentRedaction_Logic(t *testing.T) {
-	// Test the redaction logic (conceptual test since we don't mock DB)
-	smallData := make([]byte, 1*1024*1024) // 1MB
-	largeData := make([]byte, 3*1024*1024) // 3MB
-
-	if len(smallData) > MaxAttachmentSize {
-		t.Error("1MB attachment should NOT exceed MaxAttachmentSize")
-	}
-	if len(largeData) <= MaxAttachmentSize {
-		t.Error("3MB attachment SHOULD exceed MaxAttachmentSize")
-	}
-
-	// Verify redacted message format
-	redactedMsg := "<attachment redacted: test.pdf, original size: 3145728 bytes, exceeds 2 MB limit>"
-	if !contains(redactedMsg, "attachment redacted") {
-		t.Error("Redacted message should contain 'attachment redacted'")
-	}
-	if !contains(redactedMsg, "test.pdf") {
-		t.Error("Redacted message should contain filename")
-	}
-	if !contains(redactedMsg, "3145728 bytes") {
-		t.Error("Redacted message should contain original size")
+	// Verify the MaxEmailSize constant is set to 512KB
+	expected := 512 * 1024
+	if MaxEmailSize != expected {
+		t.Errorf("MaxEmailSize = %d, want %d (512KB)", MaxEmailSize, expected)
 	}
 }

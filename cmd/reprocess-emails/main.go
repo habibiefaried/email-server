@@ -1,22 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
-	"html"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
-	"github.com/google/uuid"
-	"github.com/habibiefaried/email-server/internal/parser"
+	"github.com/jhillyerd/enmime"
 	_ "github.com/lib/pq"
 )
 
 const (
-	// MaxAttachmentSize is the maximum size (in bytes) for storing attachment data.
-	// Attachments larger than this will be replaced with a redacted placeholder.
-	MaxAttachmentSize = 2 * 1024 * 1024 // 2 MB
 	// MaxEmailSize is the maximum size (in bytes) for displaying email raw content.
 	// Emails larger than this will show a limit message instead of parsed content.
 	MaxEmailSize = 512 * 1024 // 512 KB
@@ -51,7 +49,6 @@ func main() {
 		WHERE raw_content IS NOT NULL
 		  AND raw_content != ''
 		  AND (body IS NULL OR body = '')
-		  AND (html_body IS NULL OR html_body = '')
 	`)
 	if err != nil {
 		log.Fatalf("Failed to query emails: %v", err)
@@ -85,39 +82,41 @@ func main() {
 	for i, e := range emails {
 		log.Printf("[%d/%d] Processing email %s...", i+1, total, e.ID)
 
-		var body, htmlBody string
+		var body string
 
 		// Check if email exceeds 512KB limit
 		if len(e.RawContent) > MaxEmailSize {
 			limitMsg := "Limit of this service is 512kb only"
 			log.Printf("  Email exceeds 512KB limit (%d bytes), setting limit message", len(e.RawContent))
 			body = limitMsg
-			htmlBody = plainTextToHTML(limitMsg)
 		} else {
-			parsed, err := parser.Parse(e.RawContent)
+			// Parse with enmime
+			env, err := enmime.ReadEnvelope(strings.NewReader(e.RawContent))
 			if err != nil {
 				log.Printf("  SKIP: Failed to parse raw_content: %v", err)
 				skipped++
 				continue
 			}
 
-			if parsed.HTMLBody != "" {
-				htmlBody = parsed.HTMLBody
-				body = parsed.HTMLBody
-			} else if parsed.Body != "" {
-				htmlBody = plainTextToHTML(parsed.Body)
-				body = htmlBody
-			} else {
-				log.Printf("  SKIP: Parser found no body or HTML in raw_content")
+			// Check for parsing errors
+			if len(env.Errors) > 0 {
+				log.Printf("  Warning: %d parsing errors", len(env.Errors))
+			}
+
+			// Convert to HTML with inline images
+			body = emailToHTML(env)
+
+			if body == "" {
+				log.Printf("  SKIP: No body generated from email")
 				skipped++
 				continue
 			}
 		}
 
-		// Update the email body and html_body
+		// Update the email body
 		result, err := db.Exec(`
-			UPDATE email SET body = $1, html_body = $2 WHERE id = $3
-		`, body, htmlBody, e.ID)
+			UPDATE email SET body = $1 WHERE id = $2
+		`, body, e.ID)
 		if err != nil {
 			log.Printf("  FAIL: Failed to update email: %v", err)
 			failed++
@@ -131,42 +130,7 @@ func main() {
 			continue
 		}
 
-		log.Printf("  OK: Updated body (%d chars), html_body (%d chars)", len(body), len(htmlBody))
-
-		// Also re-extract attachments if parser found any that aren't in DB yet (only for emails under size limit)
-		if len(e.RawContent) <= MaxEmailSize {
-			parsed, err := parser.Parse(e.RawContent)
-			if err == nil && len(parsed.Attachments) > 0 {
-				var attCount int
-				db.QueryRow(`SELECT COUNT(*) FROM attachment WHERE email_id = $1`, e.ID).Scan(&attCount)
-
-				if attCount == 0 {
-					for _, att := range parsed.Attachments {
-						attID := generateUUIDv7()
-						attData := att.Data
-
-						// Redact large attachments (>2MB) to avoid database bloat
-						if len(attData) > MaxAttachmentSize {
-							redactedMsg := fmt.Sprintf("<attachment redacted: %s, original size: %d bytes, exceeds %d MB limit>",
-								att.Filename, len(attData), MaxAttachmentSize/(1024*1024))
-							attData = []byte(redactedMsg)
-							log.Printf("  Attachment redacted: %s (%d bytes > %d bytes limit)", att.Filename, len(att.Data), MaxAttachmentSize)
-						}
-
-						_, err := db.Exec(`
-							INSERT INTO attachment (id, email_id, filename, content_type, data)
-							VALUES ($1, $2, $3, $4, $5)
-						`, attID, e.ID, att.Filename, att.ContentType, attData)
-						if err != nil {
-							log.Printf("  WARN: Failed to insert attachment %s: %v", att.Filename, err)
-						} else {
-							log.Printf("  Inserted attachment: %s (%s, %d bytes)", att.Filename, att.ContentType, len(att.Data))
-						}
-					}
-				}
-			}
-		}
-
+		log.Printf("  OK: Updated body (%d chars)", len(body))
 		updated++
 	}
 
@@ -179,7 +143,6 @@ func main() {
 		SELECT COUNT(*) FROM email
 		WHERE raw_content IS NOT NULL AND raw_content != ''
 		  AND (body IS NULL OR body = '')
-		  AND (html_body IS NULL OR html_body = '')
 	`).Scan(&remaining)
 	if remaining > 0 {
 		log.Printf("WARNING: %d email(s) still have empty body after processing", remaining)
@@ -188,27 +151,82 @@ func main() {
 	}
 }
 
-func generateUUIDv7() string {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return uuid.New().String()
+// emailToHTML converts an enmime envelope to HTML with inline images embedded as data URIs
+func emailToHTML(env *enmime.Envelope) string {
+	// Get HTML content (enmime will auto-convert plain text to HTML if needed)
+	htmlContent := env.HTML
+	if htmlContent == "" {
+		htmlContent = "<pre>" + env.Text + "</pre>"
 	}
-	return id.String()
+
+	// Build a map of Content-ID to image data
+	images := make(map[string][]byte)
+	imageTypes := make(map[string]string)
+
+	// Process inline images
+	for _, inline := range env.Inlines {
+		// Get Content-ID from the part
+		if cid := inline.ContentID; cid != "" {
+			images[cid] = inline.Content
+			imageTypes[cid] = inline.ContentType
+		}
+	}
+
+	// Replace cid: references with data URLs
+	htmlContent = replaceCIDWithDataURL(htmlContent, images, imageTypes)
+
+	return htmlContent
 }
 
-// plainTextToHTML converts plain text email body to HTML
-func plainTextToHTML(text string) string {
-	escaped := html.EscapeString(text)
-	lines := strings.Split(escaped, "\n")
-	for i, line := range lines {
-		words := strings.Fields(line)
-		for j, word := range words {
-			if strings.HasPrefix(word, "http://") || strings.HasPrefix(word, "https://") {
-				words[j] = fmt.Sprintf(`<a href="%s">%s</a>`, word, word)
+// replaceCIDWithDataURL replaces cid: references in HTML with base64 data URIs
+func replaceCIDWithDataURL(html string, images map[string][]byte, imageTypes map[string]string) string {
+	// Find all cid: references
+	re := regexp.MustCompile(`cid:([^"'\s>]+)`)
+
+	result := re.ReplaceAllStringFunc(html, func(match string) string {
+		// Extract the CID (remove "cid:" prefix)
+		cid := match[4:]
+
+		// Look up the image data
+		if imageData, ok := images[cid]; ok {
+			mimeType := imageTypes[cid]
+			if mimeType == "" {
+				mimeType = detectImageType(imageData)
 			}
+
+			// Convert to base64 data URL
+			encoded := base64.StdEncoding.EncodeToString(imageData)
+			return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded)
 		}
-		lines[i] = strings.Join(words, " ")
+
+		return match
+	})
+
+	return result
+}
+
+// detectImageType detects image MIME type from binary data
+func detectImageType(data []byte) string {
+	if len(data) < 4 {
+		return "image/jpeg"
 	}
-	body := strings.Join(lines, "<br>\n")
-	return fmt.Sprintf(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family:sans-serif;padding:16px;white-space:pre-wrap;">%s</body></html>`, body)
+
+	// Check for common image signatures
+	if bytes.HasPrefix(data, []byte{0xFF, 0xD8, 0xFF}) {
+		return "image/jpeg"
+	}
+	if bytes.HasPrefix(data, []byte{0x89, 0x50, 0x4E, 0x47}) {
+		return "image/png"
+	}
+	if bytes.HasPrefix(data, []byte{0x47, 0x49, 0x46}) {
+		return "image/gif"
+	}
+	if bytes.HasPrefix(data, []byte{0x42, 0x4D}) {
+		return "image/bmp"
+	}
+	if bytes.HasPrefix(data, []byte("RIFF")) && len(data) > 12 && string(data[8:12]) == "WEBP" {
+		return "image/webp"
+	}
+
+	return "image/jpeg" // default
 }
