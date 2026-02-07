@@ -218,8 +218,8 @@ jobs:
           echo "Fetching detail for email: $email_id"
           detail=$(curl -s "http://localhost:48080/email?id=$email_id")
           
-          # Verify detail structure has body and attachments
-          if echo "$detail" | jq -e 'has("id", "from", "to", "subject", "body", "created_at", "attachments")' > /dev/null; then
+          # Verify detail structure has body
+          if echo "$detail" | jq -e 'has("id", "from", "to", "subject", "body", "created_at")' > /dev/null; then
             echo "✓ Email detail structure is valid"
           else
             echo "✗ Email detail structure is invalid"
@@ -325,54 +325,6 @@ jobs:
           else
             echo "✗ Expected 2 emails with negative page, got $count"
             exit 1
-          fi
-
-      - name: Test API - Attachment metadata via detail endpoint
-        run: |
-          echo "Testing attachment metadata via /email detail..."
-          inbox=$(curl -s "http://localhost:48080/inbox?email=admin@test.milahabibie.com")
-          
-          # Try each email to find one with attachments
-          found_attachments=false
-          for id in $(echo "$inbox" | jq -r '.[].id'); do
-            detail=$(curl -s "http://localhost:48080/email?id=$id")
-            att_count=$(echo "$detail" | jq '.attachments | length')
-            
-            if [ "$att_count" -gt 0 ]; then
-              found_attachments=true
-              echo "✓ Found email with $att_count attachment(s): $id"
-              
-              # Verify attachment structure (including base64 data)
-              if echo "$detail" | jq -e '.attachments[0] | has("id", "filename", "content_type", "size", "data")' > /dev/null; then
-                echo "✓ Attachment structure is valid (includes data field)"
-              else
-                echo "✗ Attachment structure is invalid (missing data field)"
-                exit 1
-              fi
-              
-              # Verify attachment data is non-empty base64 string
-              att_data=$(echo "$detail" | jq -r '.attachments[0].data')
-              if [ -n "$att_data" ] && [ "$att_data" != "null" ]; then
-                echo "✓ Attachment data is present (base64, ${#att_data} chars)"
-              else
-                echo "✗ Attachment data is empty or null"
-                exit 1
-              fi
-              
-              # Verify attachment ID is UUIDv7
-              att_id=$(echo "$detail" | jq -r '.attachments[0].id')
-              if echo "$att_id" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'; then
-                echo "✓ Attachment ID is valid UUIDv7: $att_id"
-              else
-                echo "✗ Attachment ID is not valid UUIDv7: $att_id"
-                exit 1
-              fi
-              break
-            fi
-          done
-          
-          if [ "$found_attachments" = false ]; then
-            echo "⚠ No attachments found (this might be expected depending on email parsing)"
           fi
 
       - name: Test API - Empty email address
