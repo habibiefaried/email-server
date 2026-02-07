@@ -2,7 +2,6 @@ package storage
 
 import (
 	"database/sql"
-	"encoding/base64"
 	"fmt"
 	"html"
 	"log"
@@ -348,27 +347,27 @@ func (ps *PostgresStorage) GetEmailByID(id string) (*EmailDetail, error) {
 		}
 	}
 
-	attRows, err := ps.db.Query(`
-		SELECT id, filename, COALESCE(content_type, ''), COALESCE(length(data), 0), data
-		FROM attachment WHERE email_id = $1
-	`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer attRows.Close()
+	// attRows, err := ps.db.Query(`
+	// 	SELECT id, filename, COALESCE(content_type, ''), COALESCE(length(data), 0), data
+	// 	FROM attachment WHERE email_id = $1
+	// `, id)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// defer attRows.Close()
 
-	email.Attachments = make([]AttachmentInfo, 0)
-	for attRows.Next() {
-		var att AttachmentInfo
-		var rawData []byte
-		if err := attRows.Scan(&att.ID, &att.Filename, &att.ContentType, &att.Size, &rawData); err != nil {
-			return nil, err
-		}
-		if rawData != nil {
-			att.Data = base64.StdEncoding.EncodeToString(rawData)
-		}
-		email.Attachments = append(email.Attachments, att)
-	}
+	// email.Attachments = make([]AttachmentInfo, 0)
+	// for attRows.Next() {
+	// 	var att AttachmentInfo
+	// 	var rawData []byte
+	// 	if err := attRows.Scan(&att.ID, &att.Filename, &att.ContentType, &att.Size, &rawData); err != nil {
+	// 		return nil, err
+	// 	}
+	// 	if rawData != nil {
+	// 		att.Data = base64.StdEncoding.EncodeToString(rawData)
+	// 	}
+	// 	email.Attachments = append(email.Attachments, att)
+	// }
 
 	return &email, nil
 }
