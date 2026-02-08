@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/mail"
 	"os"
 	"strconv"
 	"strings"
@@ -13,6 +14,20 @@ import (
 	"github.com/habibiefaried/email-server/internal/server"
 	"github.com/habibiefaried/email-server/internal/storage"
 )
+
+const expectedDomainIP = "149.28.152.71"
+
+func extractDomain(address string) (string, error) {
+	parsed, err := mail.ParseAddress(address)
+	if err == nil {
+		address = parsed.Address
+	}
+	parts := strings.Split(address, "@")
+	if len(parts) != 2 || parts[1] == "" {
+		return "", fmt.Errorf("invalid email address")
+	}
+	return parts[1], nil
+}
 
 func main() {
 	mailServers := os.Getenv("MAIL_SERVERS")
@@ -192,8 +207,73 @@ func main() {
 		}
 	})
 
+	// Domain validation endpoint
+	http.HandleFunc("/domain/validate", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		emailAddress := r.URL.Query().Get("email")
+		if emailAddress == "" {
+			http.Error(w, "Missing 'email' query parameter", http.StatusBadRequest)
+			return
+		}
+
+		domain, err := extractDomain(emailAddress)
+		if err != nil {
+			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			return
+		}
+
+		if err := dnsutil.ValidateFQDN(domain); err != nil {
+			http.Error(w, "Invalid email domain", http.StatusBadRequest)
+			return
+		}
+
+		aOk, aStatus := dnsutil.CheckARecord(domain, expectedDomainIP)
+		mxOk, mxStatus := dnsutil.CheckMXRecord(domain, domain)
+
+		if aOk && mxOk {
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"status": "ok",
+				"domain": domain,
+			})
+			return
+		}
+
+		message := "Domain validation failed"
+		if !aOk && !mxOk {
+			message = "A record and MX record do not match expectations"
+		} else if !aOk {
+			message = "A record does not match expected IP"
+		} else if !mxOk {
+			message = "MX record does not match expected domain"
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":    "error",
+			"domain":    domain,
+			"message":   message,
+			"a_record":  aStatus,
+			"mx_record": mxStatus,
+		})
+	})
+
 	log.Printf("Starting HTTP API on %s", addr)
-	log.Printf("Endpoints: / (health), /inbox?email=<address> (list), /email?id=<uuid> (detail)")
+	log.Printf("Endpoints: / (health), /inbox?email=<address> (list), /email?id=<uuid> (detail), /domain/validate?email=<address>")
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("Failed to start HTTP server: %v", err)
 	}
