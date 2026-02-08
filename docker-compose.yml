@@ -8,7 +8,7 @@ services:
       - .env
     ports:
       - "25:2525"
-      - "48080:48080"
+      - "127.0.0.1:48080:48080"
     volumes:
       - ./emails:/root/emails
     restart: unless-stopped
