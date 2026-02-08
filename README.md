@@ -137,7 +137,7 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
 
 ### Domain Validation API
 - **Endpoint:** `GET /domain/validate?email=<address>`
-- **Description:** Validate that a domain has correct DNS records (A and MX). Checks if the domain's A record points to `149.28.152.71` and the MX record points to the domain itself. Performs live lookups without caching.
+- **Description:** Validate that a domain has correct DNS records for email delivery. Checks if the domain's MX records point to mail servers that resolve to `149.28.152.71`. This supports both direct MX records (domain → IP) and standard mail server setups (domain → mx1.domain → IP). Performs live lookups without caching.
 - **Query Parameters:**
   - `email` (required) — Email address to validate (e.g., `user@example.com`)
 - **Response:** JSON object with validation status
@@ -151,7 +151,8 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
   ```json
   {
     "status": "ok",
-    "domain": "example.com"
+    "domain": "example.com",
+    "mx_status": "✓ OK (MX: mx1.example.com → 149.28.152.71)"
   }
   ```
 - **Failure Response Format:**
@@ -159,13 +160,12 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
   {
     "status": "error",
     "domain": "example.com",
-    "message": "A record does not match expected IP",
-    "a_record": "✗ FAILED (points to 1.2.3.4, expected 149.28.152.71)",
-    "mx_record": "✓ OK"
+    "message": "MX records do not resolve to expected IP (149.28.152.71)",
+    "mx_status": "✗ FAILED (MX records mail.example.com do not resolve to 149.28.152.71)"
   }
   ```
 
-**Note:** This endpoint performs DNS lookups directly without caching. A records must point to `149.28.152.71` for validation to succeed.
+**Note:** This endpoint performs DNS lookups directly without caching. The validation checks if any MX record for the domain resolves to `149.28.152.71`. This supports standard email configurations where MX records point to dedicated mail server subdomains (e.g., `mx1.domain.com`, `mail.domain.com`).
 
 
 Below are real-world screenshots and explanations of the server in action:

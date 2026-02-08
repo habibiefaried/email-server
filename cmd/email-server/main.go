@@ -243,32 +243,26 @@ func main() {
 			return
 		}
 
-		aOk, aStatus := dnsutil.CheckARecord(domain, expectedDomainIP)
-		mxOk, mxStatus := dnsutil.CheckMXRecord(domain, domain)
+		// Check MX records and verify they resolve to expected IP
+		// This supports both:
+		// 1. domain.com → MX → domain.com → A → IP (direct)
+		// 2. domain.com → MX → mx1.domain.com → A → IP (standard)
+		mxOk, mxStatus, _ := dnsutil.CheckMXRecordWithIP(domain, expectedDomainIP)
 
-		if aOk && mxOk {
+		if mxOk {
 			_ = json.NewEncoder(w).Encode(map[string]string{
-				"status": "ok",
-				"domain": domain,
+				"status":    "ok",
+				"domain":    domain,
+				"mx_status": mxStatus,
 			})
 			return
-		}
-
-		message := "Domain validation failed"
-		if !aOk && !mxOk {
-			message = "A record and MX record do not match expectations"
-		} else if !aOk {
-			message = "A record does not match expected IP"
-		} else if !mxOk {
-			message = "MX record does not match expected domain"
 		}
 
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":    "error",
 			"domain":    domain,
-			"message":   message,
-			"a_record":  aStatus,
-			"mx_record": mxStatus,
+			"message":   "MX records do not resolve to expected IP (149.28.152.71)",
+			"mx_status": mxStatus,
 		})
 	})
 

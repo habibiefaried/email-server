@@ -27,3 +27,16 @@ func TestCheckMXRecord_InvalidDomain(t *testing.T) {
 		t.Error("CheckMXRecord should return error message")
 	}
 }
+
+func TestCheckMXRecordWithIP_InvalidDomain(t *testing.T) {
+	ok, msg, mxHosts := CheckMXRecordWithIP("invalid-domain-xyz-9999.test", "1.2.3.4")
+	if ok {
+		t.Errorf("CheckMXRecordWithIP should fail for invalid domain: %s", msg)
+	}
+	if msg == "" {
+		t.Error("CheckMXRecordWithIP should return error message")
+	}
+	if mxHosts != nil {
+		t.Logf("MX hosts: %v", mxHosts)
+	}
+}
