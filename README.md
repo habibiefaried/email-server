@@ -37,7 +37,7 @@ $env:MAIL_SERVERS="mail1.example.com,1.2.3.4:mail2.example.com,5.6.7.8"; .\email
 ```
 
 ### 3. DNS Records
-The server prints a table of required DNS records (A, MX, PTR) and their status. PTR is optional but recommended.
+The server prints a table with required DNS records (A and MX) and their verification status.
 
 
 ## Environment Variables
@@ -61,18 +61,6 @@ To remove the binary:
 ```sh
 make clean
 ```
-
-**Testing your PTR record:**
-```bash
-nslookup -type=PTR 1.2.3.4
-# or
-dig -x 1.2.3.4
-```
-
-
-Should return: your FQDN (e.g., `mail1.example.com`)
-
-**Why it matters:** Many mail servers check PTR records to verify sender legitimacy. Without proper PTR records, your emails are more likely to be marked as spam.
 
 ## Live Testing & Screenshots
 
@@ -147,6 +135,38 @@ The server exposes HTTP endpoints on `HTTP_PORT` (default `48080`):
 
 **Note:** The `/inbox` endpoint returns **5 emails per page** (no body) for fast listing. Use `/email?id=<uuid>` to fetch the full HTML body of a specific email. The server uses enmime to parse raw MIME content and embeds inline images as data URIs. All IDs use UUIDv7 format (timestamp-sortable, non-guessable). Base64-encoded email content is automatically decoded before storage.
 
+### Domain Validation API
+- **Endpoint:** `GET /domain/validate?email=<address>`
+- **Description:** Validate that a domain has correct DNS records (A and MX). Checks if the domain's A record points to `149.28.152.71` and the MX record points to the domain itself. Performs live lookups without caching.
+- **Query Parameters:**
+  - `email` (required) — Email address to validate (e.g., `user@example.com`)
+- **Response:** JSON object with validation status
+- **CORS:** Enabled for cross-origin requests
+- **Examples:**
+  ```bash
+  # Validate a domain
+  curl http://localhost:48080/domain/validate?email=user@example.com
+  ```
+- **Success Response Format:**
+  ```json
+  {
+    "status": "ok",
+    "domain": "example.com"
+  }
+  ```
+- **Failure Response Format:**
+  ```json
+  {
+    "status": "error",
+    "domain": "example.com",
+    "message": "A record does not match expected IP",
+    "a_record": "✗ FAILED (points to 1.2.3.4, expected 149.28.152.71)",
+    "mx_record": "✓ OK"
+  }
+  ```
+
+**Note:** This endpoint performs DNS lookups directly without caching. A records must point to `149.28.152.71` for validation to succeed.
+
 
 Below are real-world screenshots and explanations of the server in action:
 
@@ -155,7 +175,7 @@ Below are real-world screenshots and explanations of the server in action:
 ![Server Startup and DNS Verification](screenshots/1.png)
 
 - The server is started with the `MAIL_SERVERS` environment variable.
-- It prints a table for each FQDN and IP pair, showing the status of A, MX, and PTR records.
+- It prints a table for each FQDN and IP pair, showing the status of A and MX records.
 - If any record is missing or incorrect, the server will not start and will print a clear error.
 
 ### 2.1. Sending an Email from Gmail
